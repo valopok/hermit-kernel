@@ -48,14 +48,11 @@ pub(crate) struct NetDevCfg {
 	pub features: virtio::net::F,
 }
 
-fn determine_mtu(dev_cfg: &NetDevCfg) -> u16 {
-	// If VIRTIO_NET_F_MTU is negotiated, "the driver uses mtu as the maximum MTU value"
-	// (VirtIO specification, 5.1.3, "Feature bits")
-	if dev_cfg.features.contains(virtio::net::F::MTU) {
-		dev_cfg.raw.as_ptr().mtu().read().to_ne()
-	} else {
-		// Otherwise, we can just use the MTU we want to use
-		mtu()
+pub struct CtrlQueue(Option<VirtQueue>);
+
+impl CtrlQueue {
+	pub fn new(vq: Option<VirtQueue>) -> Self {
+		CtrlQueue(vq)
 	}
 }
 
@@ -85,23 +82,37 @@ fn determine_buf_size(dev_cfg: &NetDevCfg) -> u32 {
 
 pub struct RxQueues {
 	vqs: Vec<VirtQueue>,
-	buf_size: u32,
+	packet_size: u32,
 }
 
 impl RxQueues {
 	pub fn new(vqs: Vec<VirtQueue>, dev_cfg: &NetDevCfg) -> Self {
-		Self {
-			vqs,
-			buf_size: determine_buf_size(dev_cfg),
-		}
+		// See Virtio specification v1.1 - 5.1.6.3.1
+		//
+		let packet_size = if dev_cfg.features.contains(virtio::net::F::MRG_RXBUF) {
+			1514
+		} else {
+			dev_cfg.raw.as_ptr().mtu().read().to_ne().into()
+		};
+
+		Self { vqs, packet_size }
+	}
+
+	/// Takes care of handling packets correctly which need some processing after being received.
+	/// This currently include nothing. But in the future it might include among others:
+	/// * Calculating missing checksums
+	/// * Merging receive buffers, by simply checking the poll_queue (if VIRTIO_NET_F_MRG_BUF)
+	fn post_processing(_buffer_tkn: &mut UsedBufferToken) -> Result<(), VirtioNetError> {
+		Ok(())
 	}
 
 	/// Adds a given queue to the underlying vector and populates the queue with RecvBuffers.
 	///
 	/// Queues are all populated according to Virtio specification v1.1. - 5.1.6.3.1
 	fn add(&mut self, mut vq: VirtQueue) {
-		let num_bufs: u16 = u16::from(vq.size()) / constants::BUFF_PER_PACKET;
-		fill_queue(&mut vq, num_bufs, self.buf_size);
+		const BUFF_PER_PACKET: u16 = 2;
+		let num_packets: u16 = u16::from(vq.size()) / BUFF_PER_PACKET;
+		fill_queue(&mut vq, num_packets, self.packet_size);
 		self.vqs.push(vq);
 	}
 
@@ -126,25 +137,24 @@ impl RxQueues {
 	}
 }
 
-fn buffer_token_from_hdr(
-	hdr: Box<MaybeUninit<Hdr>, DeviceAlloc>,
-	buf_size: u32,
-) -> AvailBufferToken {
-	AvailBufferToken::new(SmallVec::new(), {
-		SmallVec::from_buf([
-			BufferElem::Sized(hdr),
-			BufferElem::Vector(Vec::with_capacity_in(
-				buf_size.try_into().unwrap(),
-				DeviceAlloc,
-			)),
-		])
-	})
-	.unwrap()
-}
-
-fn fill_queue(vq: &mut VirtQueue, num_bufs: u16, buf_size: u32) {
-	for _ in 0..num_bufs {
-		let buff_tkn = buffer_token_from_hdr(Box::<Hdr, _>::new_uninit_in(DeviceAlloc), buf_size);
+fn fill_queue(vq: &mut VirtQueue, num_packets: u16, packet_size: u32) {
+	for _ in 0..num_packets {
+		let buff_tkn = match AvailBufferToken::new(
+			vec![],
+			vec![
+				BufferElem::Sized(Box::<Hdr, _>::new_uninit_in(DeviceAlloc)),
+				BufferElem::Vector(Vec::with_capacity_in(
+					packet_size.try_into().unwrap(),
+					DeviceAlloc,
+				)),
+			],
+		) {
+			Ok(tkn) => tkn,
+			Err(_vq_err) => {
+				error!("Setup of network queue failed, which should not happen!");
+				panic!("setup of network queue failed!");
+			}
+		};
 
 		// BufferTokens are directly provided to the queue
 		// TransferTokens are directly dispatched
@@ -160,15 +170,23 @@ fn fill_queue(vq: &mut VirtQueue, num_bufs: u16, buf_size: u32) {
 /// to the respective queue structures.
 pub struct TxQueues {
 	vqs: Vec<VirtQueue>,
-	buf_size: u32,
+	/// Indicates, whether the Driver/Device are using multiple
+	/// queues for communication.
+	packet_length: u32,
 }
 
 impl TxQueues {
 	pub fn new(vqs: Vec<VirtQueue>, dev_cfg: &NetDevCfg) -> Self {
-		Self {
-			vqs,
-			buf_size: determine_buf_size(dev_cfg),
-		}
+		let packet_length = if dev_cfg.features.contains(virtio::net::F::GUEST_TSO4)
+			| dev_cfg.features.contains(virtio::net::F::GUEST_TSO6)
+			| dev_cfg.features.contains(virtio::net::F::GUEST_UFO)
+		{
+			0x0001_000e
+		} else {
+			dev_cfg.raw.as_ptr().mtu().read().to_ne().into()
+		};
+
+		Self { vqs, packet_length }
 	}
 
 	#[allow(dead_code)]
@@ -380,7 +398,110 @@ impl NetworkDriver for VirtioNetDriver<Init> {
 
 	#[allow(dead_code)]
 	fn has_packet(&self) -> bool {
-		self.inner.recv_vqs.has_packet()
+		self.recv_vqs.has_packet()
+	}
+
+	/// Provides smoltcp a slice to copy the IP packet and transfer the packet
+	/// to the send queue.
+	fn send_packet<R, F>(&mut self, len: usize, f: F) -> R
+	where
+		F: FnOnce(&mut [u8]) -> R,
+	{
+		// We need to poll to get the queue to remove elements from the table and make space for
+		// what we are about to add
+		self.send_vqs.poll();
+
+		assert!(len < usize::try_from(self.send_vqs.packet_length).unwrap());
+		let mut packet = Vec::with_capacity_in(len, DeviceAlloc);
+		let result = unsafe {
+			let result = f(packet.spare_capacity_mut().assume_init_mut());
+			packet.set_len(len);
+			result
+		};
+
+		let mut header = Box::new_in(<Hdr as Default>::default(), DeviceAlloc);
+		// If a checksum isn't necessary, we have inform the host within the header
+		// see Virtio specification 5.1.6.2
+		if !self.checksums.tcp.tx() || !self.checksums.udp.tx() {
+			header.flags = HdrF::NEEDS_CSUM;
+			let ethernet_frame: smoltcp::wire::EthernetFrame<&[u8]> =
+				EthernetFrame::new_unchecked(&packet);
+			let packet_header_len: u16;
+			let protocol;
+			match ethernet_frame.ethertype() {
+				smoltcp::wire::EthernetProtocol::Ipv4 => {
+					let packet = Ipv4Packet::new_unchecked(ethernet_frame.payload());
+					packet_header_len = packet.header_len().into();
+					protocol = Some(packet.next_header());
+				}
+				smoltcp::wire::EthernetProtocol::Ipv6 => {
+					let packet = Ipv6Packet::new_unchecked(ethernet_frame.payload());
+					packet_header_len = packet.header_len().try_into().unwrap();
+					protocol = Some(packet.next_header());
+				}
+				_ => {
+					packet_header_len = 0;
+					protocol = None;
+				}
+			}
+			header.csum_start =
+				(u16::try_from(ETHERNET_HEADER_LEN).unwrap() + packet_header_len).into();
+			header.csum_offset = match protocol {
+				Some(smoltcp::wire::IpProtocol::Tcp) => 16,
+				Some(smoltcp::wire::IpProtocol::Udp) => 6,
+				_ => 0,
+			}
+			.into();
+		}
+
+		let buff_tkn = AvailBufferToken::new(
+			vec![BufferElem::Sized(header), BufferElem::Vector(packet)],
+			vec![],
+		)
+		.unwrap();
+
+		self.send_vqs.vqs[0]
+			.dispatch(buff_tkn, false, BufferType::Direct)
+			.unwrap();
+
+		result
+	}
+
+	fn receive_packet(&mut self) -> Option<(RxToken, TxToken)> {
+		let mut receive_single_packet = || {
+			let mut buffer_tkn = self.recv_vqs.get_next()?;
+			RxQueues::post_processing(&mut buffer_tkn)
+				.inspect_err(|vnet_err| warn!("Post processing failed. Err: {vnet_err:?}"))
+				.ok()?;
+			let header = buffer_tkn.used_recv_buff.pop_front_downcast::<Hdr>()?;
+			let packet = buffer_tkn.used_recv_buff.pop_front_vec()?;
+			Some((header, packet))
+		};
+
+		let (first_header, first_packet) = receive_single_packet()?;
+
+		// According to VIRTIO spec v1.2 sec. 5.1.6.3.2, "num_buffers will always be 1 if VIRTIO_NET_F_MRG_RXBUF is not negotiated."
+		// Unfortunately, NVIDIA MLX5 does not comply with this requirement and we have to manually set the value to the correct one.
+		let num_buffers = if self.dev_cfg.features.contains(virtio::net::F::MRG_RXBUF) {
+			first_header.num_buffers.to_ne()
+		} else {
+			1
+		};
+
+		let mut combined_packets = first_packet;
+
+		for _ in 1..num_buffers {
+			let (_header, packet) = receive_single_packet()?;
+			combined_packets.extend_from_slice(&packet);
+		}
+
+		fill_queue(
+			&mut self.recv_vqs.vqs[0],
+			num_buffers,
+			self.recv_vqs.packet_size,
+		);
+
+		Some((RxToken::new(combined_packets), TxToken::new()))
 	}
 
 	fn set_polling_mode(&mut self, value: bool) {
@@ -818,8 +939,8 @@ impl VirtioNetDriver<Uninit> {
 
 		// Add a control if feature is negotiated
 		if self.dev_cfg.features.contains(virtio::net::F::CTRL_VQ) {
-			let mut ctrl_vq = if self.dev_cfg.features.contains(virtio::net::F::RING_PACKED) {
-				VirtQueue::Packed(
+			if self.dev_cfg.features.contains(virtio::net::F::RING_PACKED) {
+				self.ctrl_vq = CtrlQueue(Some(VirtQueue::Packed(
 					PackedVq::new(
 						&mut self.com_cfg,
 						&self.notif_cfg,
@@ -830,7 +951,7 @@ impl VirtioNetDriver<Uninit> {
 					.unwrap(),
 				)
 			} else {
-				VirtQueue::Split(
+				self.ctrl_vq = CtrlQueue(Some(VirtQueue::Split(
 					SplitVq::new(
 						&mut self.com_cfg,
 						&self.notif_cfg,
@@ -907,7 +1028,7 @@ impl VirtioNetDriver<Uninit> {
 				// Interrupt for receiving packets is wanted
 				vq.enable_notifs();
 
-				inner.recv_vqs.add(VirtQueue::Packed(vq));
+				self.recv_vqs.add(VirtQueue::Packed(vq));
 
 				let mut vq = PackedVq::new(
 					&mut self.com_cfg,
@@ -920,8 +1041,7 @@ impl VirtioNetDriver<Uninit> {
 				// Interrupt for communicating that a sent packet left, is not needed
 				vq.disable_notifs();
 
-				inner.send_capacity += u32::from(u16::from(vq.size()));
-				inner.send_vqs.add(VirtQueue::Packed(vq));
+				self.send_vqs.add(VirtQueue::Packed(vq));
 			} else {
 				let mut vq = SplitVq::new(
 					&mut self.com_cfg,
@@ -934,7 +1054,7 @@ impl VirtioNetDriver<Uninit> {
 				// Interrupt for receiving packets is wanted
 				vq.enable_notifs();
 
-				inner.recv_vqs.add(VirtQueue::Split(vq));
+				self.recv_vqs.add(VirtQueue::Split(vq));
 
 				let mut vq = SplitVq::new(
 					&mut self.com_cfg,
@@ -946,8 +1066,8 @@ impl VirtioNetDriver<Uninit> {
 				.unwrap();
 				// Interrupt for communicating that a sent packet left, is not needed
 				vq.disable_notifs();
-				inner.send_capacity += u32::from(u16::from(vq.size()));
-				inner.send_vqs.add(VirtQueue::Split(vq));
+
+				self.send_vqs.add(VirtQueue::Split(vq));
 			}
 		}
 

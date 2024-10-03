@@ -3,7 +3,6 @@
 //! The module contains ...
 #![allow(dead_code)]
 
-#[cfg(any(feature = "vsock", feature = "console"))]
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::ptr::NonNull;

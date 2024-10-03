@@ -19,10 +19,11 @@ use core::mem::MaybeUninit;
 use core::{mem, ptr};
 
 use enum_dispatch::enum_dispatch;
-use smallvec::SmallVec;
+use memory_addresses::VirtAddr;
 use virtio::{le32, le64, pvirtq, virtq};
 
 use self::error::VirtqError;
+use crate::arch::mm::paging;
 use crate::drivers::virtio::virtqueue::packed::PackedVq;
 use crate::drivers::virtio::virtqueue::split::SplitVq;
 use crate::mm::device_alloc::DeviceAlloc;

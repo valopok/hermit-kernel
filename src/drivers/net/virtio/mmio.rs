@@ -2,6 +2,9 @@
 //!
 //! The module contains ...
 
+use alloc::vec::Vec;
+use core::str::FromStr;
+
 use smoltcp::phy::ChecksumCapabilities;
 use virtio::mmio::{DeviceRegisters, DeviceRegistersVolatileFieldAccess};
 use volatile::VolatileRef;
@@ -10,6 +13,7 @@ use crate::drivers::InterruptLine;
 use crate::drivers::net::virtio::{Init, NetDevCfg, Uninit, VirtioNetDriver};
 use crate::drivers::virtio::error::{VirtioError, VirtioNetError};
 use crate::drivers::virtio::transport::mmio::{ComCfg, IsrStatus, NotifCfg};
+use crate::drivers::virtio::virtqueue::VirtQueue;
 
 // Backend-dependent interface for Virtio network driver
 impl VirtioNetDriver<Uninit> {
@@ -36,6 +40,15 @@ impl VirtioNetDriver<Uninit> {
 		let isr_stat = IsrStatus::new(registers.borrow_mut());
 		let notif_cfg = NotifCfg::new(registers.borrow_mut());
 
+		let mtu = if let Some(my_mtu) = hermit_var!("HERMIT_MTU") {
+			u16::from_str(&my_mtu).unwrap()
+		} else {
+			// fallback to the default MTU
+			1514
+		};
+
+		let send_vqs = TxQueues::new(Vec::<VirtQueue>::new(), &dev_cfg);
+		let recv_vqs = RxQueues::new(Vec::<VirtQueue>::new(), &dev_cfg);
 		Ok(VirtioNetDriver {
 			dev_cfg,
 			com_cfg: ComCfg::new(registers, 1),
