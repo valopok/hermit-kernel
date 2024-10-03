@@ -467,12 +467,18 @@ impl NetworkDriver for VirtioNetDriver<Init> {
 		result
 	}
 
-	fn receive_packet(&mut self) -> Option<(RxToken, TxToken<'_>)> {
-		let mut buffer_tkn = self.inner.recv_vqs.get_next()?;
-		// Safety: any buffers that do not start with a `Hdr` must have been consumed by the previous call
-		// to this function.
-		let first_header = unsafe { buffer_tkn.used_recv_buff.pop_front_downcast::<Hdr>()? };
-		let first_packet = buffer_tkn.used_recv_buff.pop_front_vec()?;
+	fn receive_packet(&mut self) -> Option<(RxToken, TxToken)> {
+		let mut receive_single_packet = || {
+			let mut buffer_tkn = self.recv_vqs.get_next()?;
+			RxQueues::post_processing(&mut buffer_tkn)
+				.inspect_err(|vnet_err| warn!("Post processing failed. Err: {vnet_err:?}"))
+				.ok()?;
+			let header = buffer_tkn.used_recv_buff.pop_front_downcast::<Hdr>()?;
+			let packet = buffer_tkn.used_recv_buff.pop_front_vec()?;
+			Some((header, packet))
+		};
+
+		let (first_header, first_packet) = receive_single_packet()?;
 
 		// According to VIRTIO spec v1.2 sec. 5.1.6.3.2, "num_buffers will always be 1 if VIRTIO_NET_F_MRG_RXBUF is not negotiated."
 		// Unfortunately, NVIDIA MLX5 does not comply with this requirement and we have to manually set the value to the correct one.
@@ -489,7 +495,13 @@ impl NetworkDriver for VirtioNetDriver<Init> {
 			combined_packets.extend_from_slice(&packet);
 		}
 
-		Some((RxToken::new(combined_packets), TxToken::new(self)))
+		fill_queue(
+			&mut self.recv_vqs.vqs[0],
+			num_buffers,
+			self.recv_vqs.packet_size,
+		);
+
+		Some((RxToken::new(combined_packets), TxToken::new()))
 	}
 
 	fn set_polling_mode(&mut self, value: bool) {
