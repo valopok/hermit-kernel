@@ -322,3 +322,13 @@ impl Driver for NvmeDriver {
 		"nvme"
 	}
 }
+
+impl Driver for NvmeDriver {
+	fn get_interrupt_number(&self) -> InterruptLine {
+		self.irq
+	}
+
+	fn get_name(&self) -> &'static str {
+		"nvme"
+	}
+}
