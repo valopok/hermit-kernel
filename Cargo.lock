@@ -150,18 +150,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arm-pl011-uart"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8797e113733a36b5fa906c81aefc126d255b88dd1c10a737749aa22ec7736b6a"
-dependencies = [
- "bitflags 2.9.4",
- "safe-mmio",
- "thiserror",
- "zerocopy",
-]
-
-[[package]]
 name = "async-executor"
 version = "1.13.2"
 source = "git+https://github.com/hermit-os/async-executor.git?branch=no_std#d703026ada41be60c55eb79d0b29a1fbf18b7a0b"
@@ -790,12 +778,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 
 [[package]]
-name = "hashbrown"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
-
-[[package]]
 name = "heapless"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -874,6 +856,7 @@ dependencies = [
  "memory_addresses",
  "num-traits",
  "num_enum",
+ "nvme",
  "pci-ids",
  "pci_types",
  "rand_chacha",
@@ -1322,6 +1305,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "nvme"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "755d247bd0b7dc6e98a338865f45d7a4072cb50705b770d061b9abb50cce82fe"
 
 [[package]]
 name = "objc2-core-foundation"
@@ -1897,17 +1886,6 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "sysinfo"
 version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aab138f5c1bb35231de19049060a87977ad23e04f2303e953bc5c2947ac7dec4"
@@ -2080,7 +2058,7 @@ dependencies = [
  "rustls-pki-types",
  "ureq-proto",
  "utf-8",
- "webpki-roots 0.26.11",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -2184,7 +2162,7 @@ version = "0.1.0"
 source = "git+https://github.com/valopok/vroom?branch=main#b5e9c7f9debccc0b803a489a8177822abd183d9d"
 dependencies = [
  "ahash",
- "hashbrown 0.15.5",
+ "hashbrown",
  "log",
 ]
 

@@ -6,6 +6,7 @@ use core::fmt;
 
 use ahash::RandomState;
 use hashbrown::HashMap;
+use hermit_sync::without_interrupts;
 #[cfg(any(feature = "fuse", feature = "vsock", feature = "console"))]
 use hermit_sync::InterruptTicketMutex;
 use memory_addresses::{PhysAddr, VirtAddr};
@@ -32,7 +33,6 @@ use crate::drivers::net::rtl8139::{self, RTL8139Driver};
 use crate::drivers::net::virtio::VirtioNetDriver;
 #[cfg(any(feature = "tcp", feature = "udp"))]
 use crate::drivers::net::NetworkDriver;
-#[cfg(feature = "nvme")]
 use crate::drivers::nvme::NvmeDriver;
 #[cfg(any(
 	all(
@@ -344,6 +344,8 @@ pub(crate) enum PciDriver {
 	VirtioConsole(InterruptTicketMutex<VirtioConsoleDriver>),
 	#[cfg(feature = "vsock")]
 	VirtioVsock(InterruptTicketMutex<VirtioVsockDriver>),
+	#[cfg(feature = "nvme")]
+	Nvme(InterruptTicketMutex<NvmeDriver>),
 }
 
 impl PciDriver {
@@ -549,7 +551,6 @@ pub(crate) fn init() {
 			}
 		}
 
-		#[cfg(feature = "nvme")]
 		for adapter in PCI_DEVICES.finalize().iter().filter(|adapter| {
 			let (_, class_id, subclass_id, _) =
 				adapter.header().revision_and_class(adapter.access());
