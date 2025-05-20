@@ -8,6 +8,8 @@ pub mod mmio;
 pub mod net;
 #[cfg(feature = "pci")]
 pub mod pci;
+#[cfg(feature = "pci")]
+pub mod nvme;
 #[cfg(any(
 	all(any(feature = "tcp", feature = "udp"), not(feature = "rtl8139")),
 	feature = "fuse",

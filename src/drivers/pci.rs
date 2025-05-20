@@ -6,21 +6,20 @@ use core::fmt;
 
 use ahash::RandomState;
 use hashbrown::HashMap;
+use hermit_sync::without_interrupts;
 #[cfg(any(feature = "tcp", feature = "udp", feature = "fuse", feature = "vsock"))]
 use hermit_sync::InterruptTicketMutex;
-use hermit_sync::without_interrupts;
 use memory_addresses::{PhysAddr, VirtAddr};
 use pci_types::capability::CapabilityIterator;
+use pci_types::device_type::DeviceType;
 use pci_types::{
 	Bar, CommandRegister, ConfigRegionAccess, DeviceId, EndpointHeader, InterruptLine,
-	InterruptPin, MAX_BARS, PciAddress, PciHeader, StatusRegister, VendorId,
+	InterruptPin, PciAddress, PciHeader, StatusRegister, VendorId, MAX_BARS,
 };
 
 use crate::arch::pci::PciConfigRegion;
 #[cfg(feature = "fuse")]
 use crate::drivers::fs::virtio_fs::VirtioFsDriver;
-#[cfg(any(feature = "tcp", feature = "udp"))]
-use crate::drivers::net::NetworkDriver;
 #[cfg(all(target_arch = "x86_64", feature = "rtl8139"))]
 use crate::drivers::net::rtl8139::{self, RTL8139Driver};
 #[cfg(all(
@@ -28,6 +27,9 @@ use crate::drivers::net::rtl8139::{self, RTL8139Driver};
 	any(feature = "tcp", feature = "udp")
 ))]
 use crate::drivers::net::virtio::VirtioNetDriver;
+#[cfg(any(feature = "tcp", feature = "udp"))]
+use crate::drivers::net::NetworkDriver;
+use crate::drivers::nvme::NvmeDriver;
 #[cfg(any(
 	all(
 		any(feature = "tcp", feature = "udp"),
@@ -243,8 +245,7 @@ impl<T: ConfigRegionAccess> fmt::Display for PciDevice<T> {
 			};
 
 			#[cfg(not(feature = "pci-ids"))]
-			let (class_name, vendor_name, device_name) =
-				("Unknown Class", "Unknown Vendor", "Unknown Device");
+			let (class_name, vendor_name, device_name) = ("Unknown Class", "Unknown Vendor", "Unknown Device");
 
 			// Output detailed readable information about this device.
 			write!(
@@ -338,6 +339,7 @@ pub(crate) enum PciDriver {
 		any(feature = "tcp", feature = "udp")
 	))]
 	VirtioNet(InterruptTicketMutex<VirtioNetDriver>),
+	Nvme(InterruptTicketMutex<NvmeDriver>),
 	#[cfg(all(
 		target_arch = "x86_64",
 		feature = "rtl8139",
@@ -549,6 +551,31 @@ pub(crate) fn init() {
 					register_driver(PciDriver::VirtioFs(InterruptTicketMutex::new(drv)));
 				}
 				_ => {}
+			}
+		}
+
+		for adapter in PCI_DEVICES.finalize().iter().filter(|adapter| {
+			let (_, class_id, subclass_id, _) =
+				adapter.header().revision_and_class(adapter.access());
+			let device_type = DeviceType::from((class_id, subclass_id));
+			device_type == DeviceType::NvmeController
+		}) {
+			info!(
+				"Found NVMe device with device id {:#x}",
+				adapter.device_id()
+			);
+
+			match NvmeDriver::init(adapter) {
+				Ok(nvme_driver) => {
+					info!("NVMe driver initialized.");
+					register_driver(PciDriver::Nvme(InterruptTicketMutex::new(nvme_driver)));
+				}
+				Err(()) => {
+					error!(
+						"NVMe driver could not be initialized for device: {:#x}",
+						adapter.device_id()
+					);
+				}
 			}
 		}
 
