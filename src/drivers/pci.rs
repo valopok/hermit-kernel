@@ -393,7 +393,6 @@ impl PciDriver {
 	}
 
 	fn get_interrupt_handler(&self) -> (InterruptLine, fn()) {
-		#[allow(unreachable_patterns)]
 		match self {
 			#[cfg(feature = "vsock")]
 			Self::VirtioVsock(drv) => {
@@ -446,7 +445,11 @@ impl PciDriver {
 
 				(irq_number, fuse_handler)
 			}
-			_ => todo!(),
+            Self::Nvme(drv) => {
+                let irq_number = drv.lock().get_interrupt_number();
+                fn nvme_handler() {}
+                (irq_number, nvme_handler)
+            }
 		}
 	}
 }
