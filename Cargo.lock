@@ -1317,6 +1317,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvme"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "755d247bd0b7dc6e98a338865f45d7a4072cb50705b770d061b9abb50cce82fe"
+
+[[package]]
 name = "objc2-core-foundation"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
