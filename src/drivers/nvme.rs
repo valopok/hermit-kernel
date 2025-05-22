@@ -26,9 +26,61 @@ impl NvmeDriver {
 			}),
 		};
 		let (virtual_address, _size) = device.memory_map_bar(0, true).ok_or(())?;
-		let controller =
+		let mut controller =
 			nvme::Device::init(virtual_address.as_usize(), allocator).map_err(|_| ())?;
 		debug!("NVMe controller data: {:?}", controller.controller_data());
+
+		let namespaces = controller
+			.identify_namespaces(0)
+			.expect("NVMe driver: could not identify name spaces.");
+
+		let namespace = &namespaces[0];
+		let _disk_size = namespace.block_count() * namespace.block_size();
+
+		let mut qpair = controller
+			.create_io_queue_pair(namespace.clone(), 64)
+			.expect("NVMe driver: could not create io queue pair.");
+
+		const BUFFER_SIZE: usize = 16;
+        assert!(BUFFER_SIZE <= controller.controller_data().max_transfer_size);
+
+        let allocator = DeviceAlloc {};
+        let layout = unsafe { Layout::from_size_align_unchecked(BUFFER_SIZE, BasePageSize::SIZE as usize) };
+
+		let mut pointer = allocator.allocate(layout).expect("NVMe driver: could not allocate buffer.");
+		let buffer_1: &mut [u8] = unsafe { pointer.as_mut() };
+
+		let mut pointer = allocator.allocate(layout).expect("NVMe driver: could not allocate buffer.");
+		let buffer_2: &mut [u8] = unsafe { pointer.as_mut() };
+
+		// Fill buffer 1 with data
+		for i in 0..layout.size() {
+			buffer_1[i] = (i % 256) as u8;
+		}
+
+		// Write buffer 1 to the disk starting from the given Logical Block Address
+		qpair
+			.write(buffer_1.as_ptr(), buffer_1.len(), 0)
+			.expect("NVMe driver: could not write the buffer.");
+
+		// Read the written data to buffer 2 from the given Logical Block Address
+		qpair
+			.read(buffer_2.as_mut_ptr(), buffer_2.len(), 0)
+			.expect("NVMe driver: could not read to the buffer.");
+
+		// Verify the data byte-by-byte
+		for (i, (read, write)) in buffer_1.iter().zip(buffer_2.iter()).enumerate() {
+			if read != write {
+				error!("Write test: Mismatch at index {i}: {read} != {write}");
+				break;
+			}
+		}
+
+		// Delete the I/O queue pair to release resources
+		controller
+			.delete_io_queue_pair(qpair)
+			.expect("NVMe driver: could not delete io queue pair.");
+
 		Ok(Self {
 			irq: device
 				.get_irq()
