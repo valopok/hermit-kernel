@@ -374,6 +374,14 @@ impl PciDriver {
 		}
 	}
 
+	fn get_nvme_driver(&self) -> Option<&InterruptTicketMutex<NvmeDriver>> {
+		#[allow(unreachable_patterns)]
+		match self {
+			Self::Nvme(drv) => Some(drv),
+			_ => None,
+		}
+	}
+
 	#[cfg(feature = "vsock")]
 	fn get_vsock_driver(&self) -> Option<&InterruptTicketMutex<VirtioVsockDriver>> {
 		#[allow(unreachable_patterns)]
@@ -445,11 +453,11 @@ impl PciDriver {
 
 				(irq_number, fuse_handler)
 			}
-            Self::Nvme(drv) => {
-                let irq_number = drv.lock().get_interrupt_number();
-                fn nvme_handler() {}
-                (irq_number, nvme_handler)
-            }
+			Self::Nvme(drv) => {
+				let irq_number = drv.lock().get_interrupt_number();
+				fn nvme_handler() {}
+				(irq_number, nvme_handler)
+			}
 		}
 	}
 }
@@ -499,6 +507,13 @@ pub(crate) fn get_network_driver() -> Option<&'static InterruptTicketMutex<RTL81
 		.get()?
 		.iter()
 		.find_map(|drv| drv.get_network_driver())
+}
+
+pub(crate) fn get_nvme_driver() -> Option<&'static InterruptTicketMutex<NvmeDriver>> {
+	PCI_DRIVERS
+		.get()?
+		.iter()
+		.find_map(|drv| drv.get_nvme_driver())
 }
 
 #[cfg(feature = "vsock")]

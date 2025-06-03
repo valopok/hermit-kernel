@@ -42,6 +42,7 @@ mod recmutex;
 mod semaphore;
 #[cfg(any(feature = "tcp", feature = "udp", feature = "vsock"))]
 pub mod socket;
+pub(crate) mod nvme;
 mod spinlock;
 mod system;
 #[cfg(feature = "common-os")]
