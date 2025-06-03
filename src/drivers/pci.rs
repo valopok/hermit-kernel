@@ -358,6 +358,14 @@ impl PciDriver {
 		}
 	}
 
+	fn get_nvme_driver(&self) -> Option<&InterruptTicketMutex<NvmeDriver>> {
+		#[allow(unreachable_patterns)]
+		match self {
+			Self::Nvme(drv) => Some(drv),
+			_ => None,
+		}
+	}
+
 	#[cfg(feature = "vsock")]
 	fn get_vsock_driver(&self) -> Option<&InterruptTicketMutex<VirtioVsockDriver>> {
 		#[allow(unreachable_patterns)]
@@ -484,6 +492,13 @@ pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<Virti
 		.get()?
 		.iter()
 		.find_map(|drv| drv.get_console_driver())
+}
+
+pub(crate) fn get_nvme_driver() -> Option<&'static InterruptTicketMutex<NvmeDriver>> {
+	PCI_DRIVERS
+		.get()?
+		.iter()
+		.find_map(|drv| drv.get_nvme_driver())
 }
 
 #[cfg(feature = "vsock")]
