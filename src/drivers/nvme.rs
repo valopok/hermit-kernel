@@ -16,14 +16,17 @@ use crate::drivers::Driver;
 use crate::mm::device_alloc::DeviceAlloc;
 use crate::syscalls::nvme::SysNvmeError;
 
+const MAX_NUMBER_OF_QUEUE_PAIRS: usize = 2;
+
 pub(crate) struct NvmeDriver {
 	irq: InterruptLine,
 	// vendor_id: u16,
 	// device_id: u16,
 	controller: nvme::Device<NvmeAllocator>,
 	// TODO: Replace with a concurrent hashmap. See crate::synch::futex.
-	io_queue_pairs:
-		Lazy<InterruptTicketMutex<HashMap<usize, nvme::IoQueuePair<NvmeAllocator>, RandomState>>>,
+	io_queue_pairs: Lazy<
+		InterruptTicketMutex<HashMap<IoQueuePairId, nvme::IoQueuePair<NvmeAllocator>, RandomState>>,
+	>,
 }
 
 impl NvmeDriver {
@@ -58,6 +61,14 @@ impl NvmeDriver {
 			.map_err(|_| SysNvmeError::CouldNotIdentifyNamespaces)
 	}
 
+	pub(crate) fn get_max_buffer_size(&mut self) -> usize {
+		self.controller.controller_data().max_transfer_size
+	}
+
+	pub(crate) fn get_max_number_of_queue_entries(&mut self) -> u16 {
+		self.controller.controller_data().max_queue_entries
+	}
+
 	/// Gets the size of a namespace in bytes.
 	pub(crate) fn get_size_of_namespace(
 		&mut self,
@@ -73,12 +84,14 @@ impl NvmeDriver {
 		Ok(namespace.block_count() * namespace.block_size())
 	}
 
-	/// Creates an IO queue pair with a number of entries for a namespace and returns its ID.
+	/// Creates an IO queue pair with a number of entries for a namespace.
+	/// Only two IO queue pairs can exist at a time (This might be different if using multiple
+    /// threads and could be tested in the future).
 	pub(crate) fn create_io_queue_pair(
 		&mut self,
 		namespace_index: usize,
-		number_of_entries: usize,
-	) -> Result<usize, SysNvmeError> {
+		number_of_entries: u16,
+	) -> Result<IoQueuePairId, SysNvmeError> {
 		let namespaces = self
 			.controller
 			.identify_namespaces(0)
@@ -86,37 +99,32 @@ impl NvmeDriver {
 		let namespace = namespaces
 			.get(namespace_index)
 			.ok_or(SysNvmeError::NamespaceDoesNotExist)?;
+		let mut io_queue_pairs = self.io_queue_pairs.lock();
+		if io_queue_pairs.len() == MAX_NUMBER_OF_QUEUE_PAIRS {
+			return Err(SysNvmeError::MaxNumberOfQueuesReached);
+		}
 		let io_queue_pair = self
 			.controller
-			.create_io_queue_pair(namespace.to_owned(), number_of_entries)
+			.create_io_queue_pair(namespace.to_owned(), number_of_entries as usize)
 			.map_err(|_| SysNvmeError::CouldNotCreateIoQueuePair)?;
-		let mut io_queue_pairs = self.io_queue_pairs.lock();
 		// Simple way to avoid collisions while reusing some previously deleted keys.
-		// This can definitely be improved.
-		let min = io_queue_pairs
-			.keys()
-			.min()
-			.map(|m| m.to_owned())
-			.unwrap_or(0);
-		let max = io_queue_pairs
-			.keys()
-			.max()
-			.map(|m| m.to_owned())
-			.unwrap_or(0);
-		let index;
-		if min != 0 {
-			index = min - 1;
-		} else {
-			index = max + 1;
-		}
+		let mut index_option = None;
+		(0..MAX_NUMBER_OF_QUEUE_PAIRS).for_each(|i| {
+			if !io_queue_pairs.contains_key(&IoQueuePairId(i)) {
+				index_option = Some(IoQueuePairId(i));
+				return;
+			}
+		});
+		let index = index_option.ok_or(SysNvmeError::MaxNumberOfQueuesReached)?;
+		let result = IoQueuePairId(index.0);
 		io_queue_pairs.insert(index, io_queue_pair);
-		Ok(index)
+		Ok(result)
 	}
 
 	/// Deletes an IO queue pair and frees its resources.
 	pub(crate) fn delete_io_queue_pair(
 		&mut self,
-		io_queue_pair_id: usize,
+		io_queue_pair_id: IoQueuePairId,
 	) -> Result<(), SysNvmeError> {
 		let io_queue_pair = self
 			.io_queue_pairs
@@ -131,13 +139,13 @@ impl NvmeDriver {
 	/// Reads from an IO queue pair into a buffer starting from a Logical Block Address.
 	pub(crate) fn read_from_io_queue_pair(
 		&mut self,
-		io_queue_pair_id: usize,
+		io_queue_pair_id: &IoQueuePairId,
 		buffer: &mut [u8],
 		logical_block_address: u64,
 	) -> Result<(), SysNvmeError> {
 		let mut io_queue_pairs = self.io_queue_pairs.lock();
 		let io_queue_pair = io_queue_pairs
-			.get_mut(&io_queue_pair_id)
+			.get_mut(io_queue_pair_id)
 			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
 		if buffer.len() > self.controller.controller_data().max_transfer_size {
 			return Err(SysNvmeError::BufferTooBig);
@@ -165,13 +173,13 @@ impl NvmeDriver {
 	/// Writes a buffer to an IO queue pair starting from a Logical Block Address.
 	pub(crate) fn write_to_io_queue_pair(
 		&mut self,
-		io_queue_pair_id: usize,
+		io_queue_pair_id: &IoQueuePairId,
 		buffer: &[u8],
 		logical_block_address: u64,
 	) -> Result<(), SysNvmeError> {
 		let mut io_queue_pairs = self.io_queue_pairs.lock();
 		let io_queue_pair = io_queue_pairs
-			.get_mut(&io_queue_pair_id)
+			.get_mut(io_queue_pair_id)
 			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
 		if buffer.len() > self.controller.controller_data().max_transfer_size {
 			return Err(SysNvmeError::BufferTooBig);
@@ -193,6 +201,21 @@ impl NvmeDriver {
 			)
 			.map_err(|_| SysNvmeError::CouldNotWriteToIoQueuePair)?;
 		Ok(())
+	}
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct IoQueuePairId(usize);
+
+impl From<usize> for IoQueuePairId {
+	fn from(value: usize) -> Self {
+		IoQueuePairId(value)
+	}
+}
+
+impl Into<usize> for IoQueuePairId {
+	fn into(self) -> usize {
+		self.0
 	}
 }
 
