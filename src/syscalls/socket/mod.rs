@@ -1054,7 +1054,7 @@ pub unsafe extern "C" fn sys_getaddrinfo(
 	_hints: *const addrinfo,
 	_res: *mut *mut addrinfo,
 ) -> i32 {
-	-i32::from(Errno::Inval)
+	-EINVAL
 }
 
 #[hermit_macro::system(errno)]
