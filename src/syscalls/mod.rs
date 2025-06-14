@@ -349,7 +349,7 @@ pub unsafe extern "C" fn sys_open(name: *const c_char, flags: i32, mode: u32) ->
 	}
 }
 
-#[hermit_macro::system]
+#[hermit_macro::system(errno)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sys_getcwd(buf: *mut c_char, size: usize) -> *const c_char {
 	let error = |e: Errno| {
@@ -406,7 +406,7 @@ pub unsafe extern "C" fn sys_chdir(path: *mut c_char) -> i32 {
 	}
 }
 
-#[hermit_macro::system]
+#[hermit_macro::system(errno)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sys_umask(umask: u32) -> u32 {
 	crate::fs::umask(AccessPermission::from_bits_truncate(umask)).bits()
@@ -736,55 +736,6 @@ impl Dirent64 {
 	}
 }
 
-mod dirent_display {
-	use core::ffi::{CStr, c_char};
-	use core::fmt;
-
-	use super::Dirent64;
-
-	/// Helperstruct for unsafe formatting of [`Dirent64`]
-	pub(super) struct Dirent64Display<'a> {
-		dirent: &'a Dirent64,
-	}
-	impl<'a> Dirent64Display<'a> {
-		/// # Safety
-		/// The `d_name` ptr of `dirent` must be valid and zero-terminated.
-		pub(super) unsafe fn new(dirent: &'a Dirent64) -> Self {
-			Self { dirent }
-		}
-	}
-
-	impl<'a> fmt::Debug for Dirent64Display<'a> {
-		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-			let cstr = unsafe { CStr::from_ptr((&raw const self.dirent.d_name).cast::<c_char>()) };
-
-			f.debug_struct("Dirent64")
-				.field("d_ino", &self.dirent.d_ino)
-				.field("d_off", &self.dirent.d_off)
-				.field("d_reclen", &self.dirent.d_reclen)
-				.field("d_type", &self.dirent.d_type)
-				.field("d_name", &cstr)
-				.finish()
-		}
-	}
-}
-
-/// Read the entries of a directory.
-/// Similar as the Linux system-call, this reads up to `count` bytes and returns the number of
-/// bytes written. If the size was not sufficient to list all directory entries, subsequent calls
-/// to this fn return the next entries.
-///
-/// Parameters:
-///
-/// - `fd`: File Descriptor of the directory in question.
-/// -`dirp`: Memory for the kernel to store the filled `Dirent64` objects including the c-strings with the filenames to.
-/// - `count`: Size of the memory region described by `dirp` in bytes.
-///
-/// Return:
-///
-/// The number of bytes read into `dirp` on success. Zero indicates that no more entries remain and
-/// the directories readposition needs to be reset using `sys_lseek`.
-/// Negative numbers encode errors.
 #[hermit_macro::system(errno)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sys_getdents64(

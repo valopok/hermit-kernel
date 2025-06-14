@@ -1057,6 +1057,21 @@ pub unsafe extern "C" fn sys_getpeername(
 	)
 }
 
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sys_freeaddrinfo(_ai: *mut addrinfo) {}
+
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sys_getaddrinfo(
+	_nodename: *const c_char,
+	_servname: *const c_char,
+	_hints: *const addrinfo,
+	_res: *mut *mut addrinfo,
+) -> i32 {
+	-EINVAL
+}
+
 #[hermit_macro::system(errno)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sys_send(s: i32, mem: *const c_void, len: usize, _flags: i32) -> isize {
