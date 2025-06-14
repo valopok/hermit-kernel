@@ -179,6 +179,10 @@ mod tests {
 			#[cfg(target_os = "none")]
 			#[unsafe(no_mangle)]
 			pub extern "C" fn sys_test(a: i8, b: i16) -> i32 {
+				if a == 0 {
+					return 0;
+				}
+
 				let c = i16::from(a) + b;
 				i32::from(c)
 			}
@@ -192,6 +196,10 @@ mod tests {
 			#[unsafe(no_mangle)]
 			pub extern "C" fn sys_test(a: i8, b: i16) -> i32 {
 				extern "C" fn __sys_test(a: i8, b: i16) -> i32 {
+					if a == 0 {
+						return 0;
+					}
+
 					let c = i16::from(a) + b;
 					i32::from(c)
 				}
@@ -230,6 +238,10 @@ mod tests {
 			#[cfg(target_os = "none")]
 			#[unsafe(no_mangle)]
 			pub unsafe extern "C" fn sys_test(a: i8, b: i16) -> i32 {
+				if a == 0 {
+					return 0;
+				}
+
 				let c = i16::from(a) + b;
 				i32::from(c)
 			}
@@ -243,6 +255,10 @@ mod tests {
 			#[unsafe(no_mangle)]
 			pub unsafe extern "C" fn sys_test(a: i8, b: i16) -> i32 {
 				unsafe extern "C" fn __sys_test(a: i8, b: i16) -> i32 {
+					if a == 0 {
+						return 0;
+					}
+
 					let c = i16::from(a) + b;
 					i32::from(c)
 				}
