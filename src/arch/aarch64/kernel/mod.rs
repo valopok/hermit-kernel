@@ -1,8 +1,9 @@
 pub mod core_local;
 pub mod interrupts;
-#[cfg(feature = "kernel-stack")]
-pub mod kernel_stack;
-#[cfg(all(not(feature = "pci"), any(feature = "virtio-net", feature = "console")))]
+#[cfg(all(
+	not(feature = "pci"),
+	any(feature = "tcp", feature = "udp", feature = "console")
+))]
 pub mod mmio;
 #[cfg(feature = "pci")]
 pub mod pci;
@@ -24,6 +25,54 @@ use crate::arch::aarch64::kernel::core_local::*;
 use crate::arch::aarch64::mm::paging::{BasePageSize, PageSize};
 use crate::config::*;
 use crate::env;
+
+const SERIAL_PORT_BAUDRATE: u32 = 115_200;
+
+pub(crate) struct Console {
+	serial_port: SerialPort,
+}
+
+impl Console {
+	pub fn new() -> Self {
+		CoreLocal::install();
+
+		let base = env::boot_info()
+			.hardware_info
+			.serial_port_base
+			.map(|uartport| uartport.get());
+
+		let serial_port = SerialPort::new(base);
+
+		serial_port.init(SERIAL_PORT_BAUDRATE);
+
+		Self { serial_port }
+	}
+
+	pub fn write(&mut self, buf: &[u8]) {
+		self.serial_port.write_buf(buf);
+	}
+
+	pub fn read(&mut self) -> Option<u8> {
+		None
+	}
+
+	pub fn is_empty(&self) -> bool {
+		true
+	}
+
+	#[cfg(feature = "console")]
+	pub fn switch_to_virtio_console(&mut self) {
+		self.serial_port.switch_to_virtio_console();
+	}
+
+	pub fn register_waker(&mut self, _waker: &Waker) {}
+}
+
+impl Default for Console {
+	fn default() -> Self {
+		Self::new()
+	}
+}
 
 #[repr(align(8))]
 pub(crate) struct AlignedAtomicU32(AtomicU32);

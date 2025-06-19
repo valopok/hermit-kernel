@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-#[cfg(all(any(feature = "virtio-net", feature = "console"), not(feature = "pci")))]
+#[cfg(all(any(feature = "tcp", feature = "udp"), not(feature = "pci")))]
 use core::ptr::NonNull;
 
 use fdt::Fdt;
@@ -215,19 +215,10 @@ pub fn init_drivers() {
 				// Verify the device-ID to find the network card
 				let id = mmio.as_ptr().device_id().read();
 
-				if cfg!(debug_assertions) {
-					use free_list::PageRange;
-
-					use crate::mm::physicalmem::PHYSICAL_FREE_LIST;
-
-					let start = virtio_region.starting_address.addr();
-					let len = virtio_region.size.unwrap();
-					let frame_range = PageRange::from_start_len(start, len).unwrap();
-
-					PHYSICAL_FREE_LIST
-						.lock()
-						.allocate_at(frame_range)
-						.unwrap_err();
+				#[cfg(any(feature = "tcp", feature = "udp"))]
+				if id != virtio::Id::Net {
+					debug!("It's not a network card at {mmio:p}");
+					return;
 				}
 
 				match id {

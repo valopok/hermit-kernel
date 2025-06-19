@@ -10,7 +10,7 @@ cfg_if::cfg_if! {
 
 use alloc::vec::Vec;
 
-use embedded_io::{ErrorType, Read, ReadReady, Write};
+use hermit_sync::without_interrupts;
 use smallvec::SmallVec;
 use virtio::FeatureBits;
 use virtio::console::Config;
@@ -19,10 +19,6 @@ use volatile::access::ReadOnly;
 
 use crate::VIRTIO_MAX_QUEUE_SIZE;
 use crate::drivers::error::DriverError;
-#[cfg(not(feature = "pci"))]
-use crate::drivers::mmio::get_console_driver;
-#[cfg(feature = "pci")]
-use crate::drivers::pci::get_console_driver;
 use crate::drivers::virtio::error::VirtioConsoleError;
 #[cfg(not(feature = "pci"))]
 use crate::drivers::virtio::transport::mmio::{ComCfg, IsrStatus, NotifCfg};
@@ -33,19 +29,21 @@ use crate::drivers::virtio::virtqueue::{
 	AvailBufferToken, BufferElem, BufferType, UsedBufferToken, VirtQueue, Virtq, VqIndex, VqSize,
 };
 use crate::drivers::{Driver, InterruptLine};
-use crate::errno::Errno;
 use crate::mm::device_alloc::DeviceAlloc;
 
 fn fill_queue(vq: &mut VirtQueue, num_packets: u16, packet_size: u32) {
 	for _ in 0..num_packets {
-		let buff_tkn = match AvailBufferToken::new(SmallVec::new(), {
-			let mut vec = SmallVec::new();
-			vec.push(BufferElem::Vector(Vec::with_capacity_in(
-				packet_size.try_into().unwrap(),
-				DeviceAlloc,
-			)));
-			vec
-		}) {
+		let buff_tkn = match AvailBufferToken::new(
+			{
+				let mut vec = SmallVec::new();
+				vec.push(BufferElem::Vector(Vec::with_capacity_in(
+					packet_size.try_into().unwrap(),
+					DeviceAlloc,
+				)));
+				vec
+			},
+			SmallVec::new(),
+		) {
 			Ok(tkn) => tkn,
 			Err(_vq_err) => {
 				panic!("Setup of console queue failed, which should not happen!");
@@ -59,52 +57,6 @@ fn fill_queue(vq: &mut VirtQueue, num_packets: u16, packet_size: u32) {
 			error!("{err:#?}");
 			break;
 		}
-	}
-}
-
-pub(crate) struct VirtioUART;
-
-impl VirtioUART {
-	pub const fn new() -> Self {
-		Self {}
-	}
-}
-
-impl ErrorType for VirtioUART {
-	type Error = Errno;
-}
-
-impl Read for VirtioUART {
-	fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-		if let Some(drv) = get_console_driver() {
-			drv.lock().read(buf)
-		} else {
-			Err(Errno::Io)
-		}
-	}
-}
-
-impl ReadReady for VirtioUART {
-	fn read_ready(&mut self) -> Result<bool, Self::Error> {
-		if let Some(drv) = get_console_driver() {
-			Ok(drv.lock().has_packet())
-		} else {
-			Ok(false)
-		}
-	}
-}
-
-impl Write for VirtioUART {
-	fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-		if let Some(drv) = get_console_driver() {
-			drv.lock().write_all(buf)?;
-		}
-
-		Ok(buf.len())
-	}
-
-	fn flush(&mut self) -> Result<(), Self::Error> {
-		Ok(())
 	}
 }
 
@@ -123,8 +75,9 @@ impl RxQueue {
 	}
 
 	pub fn add(&mut self, mut vq: VirtQueue) {
-		const BUFF_PER_PACKET: u16 = 2;
+		const BUFF_PER_PACKET: u16 = 1;
 		let num_packets: u16 = u16::from(vq.size()) / BUFF_PER_PACKET;
+		info!("num_packets {num_packets}");
 		fill_queue(&mut vq, num_packets, self.packet_size);
 
 		self.vq = Some(vq);
@@ -142,33 +95,25 @@ impl RxQueue {
 		}
 	}
 
-	fn has_packet(&self) -> bool {
-		self.vq.iter().any(|vq| vq.has_used_buffers())
-	}
-
 	fn get_next(&mut self) -> Option<UsedBufferToken> {
 		self.vq.as_mut().unwrap().try_recv().ok()
 	}
 
-	pub fn process_packet<F>(&mut self, mut f: F) -> Result<usize, DriverError>
+	pub fn process_packet<F>(&mut self, mut f: F)
 	where
-		F: FnMut(&[u8]) -> usize,
+		F: FnMut(&[u8]),
 	{
-		if let Some(mut buffer_tkn) = self.get_next() {
+		while let Some(mut buffer_tkn) = self.get_next() {
 			let packet = buffer_tkn.used_recv_buff.pop_front_vec().unwrap();
 
 			if let Some(ref mut vq) = self.vq {
-				let result = f(&packet[..]);
+				f(&packet[..]);
 
 				fill_queue(vq, 1, self.packet_size);
-
-				return Ok(result);
 			} else {
 				panic!("Invalid length of receive queue");
 			}
 		}
-
-		Ok(0)
 	}
 }
 
@@ -269,15 +214,37 @@ impl Driver for VirtioConsoleDriver {
 }
 
 impl VirtioConsoleDriver {
-	pub fn has_packet(&self) -> bool {
-		self.recv_vq.has_packet()
+	pub fn write(&mut self, buf: &[u8]) -> Result<(), DriverError> {
+		without_interrupts(|| {
+			self.send_vq.send_packet(buf);
+		});
+
+		Ok(())
+	}
+
+	pub fn read(&mut self) -> Result<Option<u8>, DriverError> {
+		// Logic to read data from the console
+		Ok(None)
 	}
 
 	/// Handle interrupt and acknowledge interrupt
 	pub fn handle_interrupt(&mut self) {
-		let _status = self.isr_stat.is_queue_interrupt();
+		let status = self.isr_stat.is_queue_interrupt();
 
-		crate::console::CONSOLE_WAKER.lock().wake();
+		debug!("Virtion console receive interrupt!");
+
+		#[cfg(not(feature = "pci"))]
+		if status.contains(virtio::mmio::InterruptStatus::CONFIGURATION_CHANGE_NOTIFICATION) {
+			info!("Configuration changes are not possible! Aborting");
+			todo!("Implement possibility to change config on the fly...");
+		}
+
+		#[cfg(feature = "pci")]
+		if status.contains(virtio::pci::IsrStatus::DEVICE_CONFIGURATION_INTERRUPT) {
+			info!("Configuration changes are not possible! Aborting");
+			todo!("Implement possibility to change config on the fly...");
+		}
+
 		self.isr_stat.acknowledge();
 	}
 
@@ -373,33 +340,6 @@ impl VirtioConsoleDriver {
 		// At this point the device is "live"
 		self.com_cfg.drv_ok();
 
-		Ok(())
-	}
-}
-
-impl ErrorType for VirtioConsoleDriver {
-	type Error = Errno;
-}
-
-impl Read for VirtioConsoleDriver {
-	fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-		self.recv_vq
-			.process_packet(|src| {
-				buf[..src.len()].copy_from_slice(src);
-				src.len()
-			})
-			.map_err(|_| Errno::Io)
-	}
-}
-
-impl Write for VirtioConsoleDriver {
-	fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-		self.send_vq.send_packet(buf);
-
-		Ok(buf.len())
-	}
-
-	fn flush(&mut self) -> Result<(), Self::Error> {
 		Ok(())
 	}
 }

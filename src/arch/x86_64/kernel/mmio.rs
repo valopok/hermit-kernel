@@ -19,7 +19,7 @@ use crate::arch::x86_64::mm::paging::{
 };
 #[cfg(feature = "console")]
 use crate::drivers::console::VirtioConsoleDriver;
-#[cfg(feature = "virtio-net")]
+#[cfg(any(feature = "tcp", feature = "udp"))]
 use crate::drivers::net::virtio::VirtioNetDriver;
 use crate::drivers::virtio::transport::mmio as mmio_virtio;
 use crate::drivers::virtio::transport::mmio::VirtioDriver;
@@ -39,15 +39,28 @@ const IRQ_NUMBER: u8 = 44 - 32;
 static MMIO_DRIVERS: InitCell<Vec<MmioDriver>> = InitCell::new(Vec::new());
 
 pub(crate) enum MmioDriver {
+	#[cfg(any(feature = "tcp", feature = "udp"))]
+	VirtioNet(InterruptTicketMutex<VirtioNetDriver>),
 	#[cfg(feature = "console")]
 	VirtioConsole(InterruptTicketMutex<VirtioConsoleDriver>),
 }
 
 impl MmioDriver {
+	#[allow(unreachable_patterns)]
+	#[cfg(any(feature = "tcp", feature = "udp"))]
+	fn get_network_driver(&self) -> Option<&InterruptTicketMutex<VirtioNetDriver>> {
+		match self {
+			Self::VirtioConsole(drv) => Some(drv),
+		}
+	}
+
+	#[allow(unreachable_patterns)]
 	#[cfg(feature = "console")]
 	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
 		match self {
 			Self::VirtioConsole(drv) => Some(drv),
+			#[cfg(any(feature = "tcp", feature = "udp"))]
+			_ => None,
 		}
 	}
 }
@@ -221,8 +234,13 @@ pub(crate) fn register_driver(drv: MmioDriver) {
 	MMIO_DRIVERS.with(|mmio_drivers| mmio_drivers.unwrap().push(drv));
 }
 
-#[cfg(feature = "virtio-net")]
-pub(crate) type NetworkDevice = VirtioNetDriver;
+#[cfg(any(feature = "tcp", feature = "udp"))]
+pub(crate) fn get_network_driver() -> Option<&'static InterruptTicketMutex<VirtioNetDriver>> {
+	MMIO_DRIVERS
+		.get()?
+		.iter()
+		.find_map(|drv| drv.get_console_driver())
+}
 
 #[cfg(feature = "console")]
 pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<VirtioConsoleDriver>> {
@@ -235,7 +253,7 @@ pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<Virti
 pub(crate) fn init_drivers() {
 	// virtio: MMIO Device Discovery
 	without_interrupts(|| {
-		#[cfg(feature = "virtio-net")]
+		#[cfg(any(feature = "tcp", feature = "udp"))]
 		if let Ok((mmio, irq)) = detect_network() {
 			warn!("Found MMIO device, but we guess the interrupt number {irq}!");
 			match mmio_virtio::init_device(mmio, irq) {

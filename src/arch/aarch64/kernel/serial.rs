@@ -1,18 +1,18 @@
 use alloc::collections::vec_deque::VecDeque;
 use core::ptr::NonNull;
 
-use arm_pl011_uart::{DataBits, Interrupts, LineConfig, Parity, StopBits, Uart, UniqueMmioPointer};
-use embedded_io::{ErrorType, Read, ReadReady, Write};
-use hermit_sync::{InterruptTicketMutex, Lazy};
+#[cfg(all(feature = "pci", feature = "console"))]
+use crate::drivers::pci::get_console_driver;
+#[cfg(all(not(feature = "pci"), feature = "console"))]
+use crate::kernel::mmio::get_console_driver;
+use crate::syscalls::interfaces::serial_buf_hypercall;
 
-use crate::errno::Errno;
-
-static UART_DEVICE: Lazy<InterruptTicketMutex<UartDevice>> =
-	Lazy::new(|| InterruptTicketMutex::new(UartDevice::new()));
-
-pub(crate) struct UartDevice {
-	uart: Uart<'static>,
-	buffer: VecDeque<u8>,
+enum SerialInner {
+	None,
+	Uart(u32),
+	Uhyve,
+	#[cfg(feature = "console")]
+	Virtio,
 }
 
 impl UartDevice {
@@ -45,75 +45,73 @@ impl UartDevice {
 	}
 }
 
-pub(crate) struct SerialDevice;
-
-impl SerialDevice {
-	pub fn new() -> Self {
-		Self
-	}
-}
-
-impl ErrorType for SerialDevice {
-	type Error = Errno;
-}
-
-impl Read for SerialDevice {
-	fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-		let mut guard = UART_DEVICE.lock();
-
-		if guard.buffer.is_empty() {
-			Ok(0)
+impl SerialPort {
+	pub fn new(port_address: Option<u64>) -> Self {
+		if crate::env::is_uhyve() {
+			Self {
+				inner: SerialInner::Uhyve,
+			}
+		} else if let Some(port_address) = port_address {
+			Self {
+				inner: SerialInner::Uart(port_address.try_into().unwrap()),
+			}
 		} else {
-			let min = buf.len().min(guard.buffer.len());
-
-			for (dst, src) in buf[..min].iter_mut().zip(guard.buffer.drain(..min)) {
-				*dst = src;
+			Self {
+				inner: SerialInner::None,
 			}
 
 			Ok(min)
 		}
 	}
-}
 
-impl ReadReady for SerialDevice {
-	fn read_ready(&mut self) -> Result<bool, Self::Error> {
-		Ok(!UART_DEVICE.lock().buffer.is_empty())
+	#[cfg(feature = "console")]
+	pub fn switch_to_virtio_console(&mut self) {
+		self.inner = SerialInner::Virtio;
 	}
-}
 
-impl Write for SerialDevice {
-	fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-		let mut guard = UART_DEVICE.lock();
+	pub fn write_buf(&mut self, buf: &[u8]) {
+		match &mut self.inner {
+			SerialInner::None => {
+				// No serial port configured, do nothing.
+			}
+			SerialInner::Uhyve => {
+				serial_buf_hypercall(buf);
+			}
+			SerialInner::Uart(port_address) => {
+				let port = core::ptr::with_exposed_provenance_mut::<u8>(*port_address as usize);
+				for &byte in buf {
+					// LF newline characters need to be extended to CRLF over a real serial port.
+					if byte == b'\n' {
+						unsafe {
+							asm!(
+								"strb w8, [{port}]",
+								port = in(reg) port,
+								in("x8") b'\r',
+								options(nostack),
+							);
+						}
+					}
 
-		for byte in buf {
-			guard.uart.write_word(*byte);
+					unsafe {
+						asm!(
+							"strb w8, [{port}]",
+							port = in(reg) port,
+							in("x8") byte,
+							options(nostack),
+						);
+					}
+				}
+			}
+			#[cfg(feature = "console")]
+			SerialInner::Virtio => {
+				if let Some(console_driver) = get_console_driver() {
+					let _ = console_driver.lock().write(buf);
+				}
+			}
 		}
-
-		Ok(buf.len())
 	}
 
-	fn flush(&mut self) -> Result<(), Self::Error> {
-		Ok(())
+	pub fn init(&self, _baudrate: u32) {
+		// We don't do anything here (yet).
 	}
-}
-
-pub(crate) fn handle_uart_interrupt() {
-	let mut guard = UART_DEVICE.lock();
-
-	while let Ok(Some(mut byte)) = guard.uart.read_word() {
-		// Normalize CR to LF
-		if byte == b'\r' {
-			byte = b'\n';
-		}
-
-		guard.buffer.push_back(byte);
-	}
-
-	guard
-		.uart
-		.clear_interrupts(Interrupts::RXI | Interrupts::RTI);
-
-	drop(guard);
-
-	crate::console::CONSOLE_WAKER.lock().wake();
 }
