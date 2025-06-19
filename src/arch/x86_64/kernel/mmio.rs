@@ -39,11 +39,21 @@ const IRQ_NUMBER: u8 = 44 - 32;
 static MMIO_DRIVERS: InitCell<Vec<MmioDriver>> = InitCell::new(Vec::new());
 
 pub(crate) enum MmioDriver {
+	#[cfg(any(feature = "tcp", feature = "udp"))]
+	VirtioNet(InterruptTicketMutex<VirtioNetDriver>),
 	#[cfg(feature = "console")]
 	VirtioConsole(InterruptTicketMutex<VirtioConsoleDriver>),
 }
 
 impl MmioDriver {
+	#[allow(unreachable_patterns)]
+	#[cfg(any(feature = "tcp", feature = "udp"))]
+	fn get_network_driver(&self) -> Option<&InterruptTicketMutex<VirtioNetDriver>> {
+		match self {
+			Self::VirtioConsole(drv) => Some(drv),
+		}
+	}
+
 	#[allow(unreachable_patterns)]
 	#[cfg(feature = "console")]
 	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
@@ -225,7 +235,12 @@ pub(crate) fn register_driver(drv: MmioDriver) {
 }
 
 #[cfg(any(feature = "tcp", feature = "udp"))]
-pub(crate) type NetworkDevice = VirtioNetDriver;
+pub(crate) fn get_network_driver() -> Option<&'static InterruptTicketMutex<VirtioNetDriver>> {
+	MMIO_DRIVERS
+		.get()?
+		.iter()
+		.find_map(|drv| drv.get_console_driver())
+}
 
 #[cfg(feature = "console")]
 pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<VirtioConsoleDriver>> {

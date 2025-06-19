@@ -20,7 +20,7 @@ pub mod nvme;
 	),
 	feature = "fuse",
 	feature = "vsock",
-	feature = "console",
+	feature = "console"
 ))]
 pub mod virtio;
 #[cfg(feature = "vsock")]
@@ -51,17 +51,16 @@ pub mod error {
 		),
 		feature = "fuse",
 		feature = "vsock",
-		feature = "console",
+		feature = "console"
 	))]
 	use crate::drivers::virtio::error::VirtioError;
 
 	#[cfg(any(
-		all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
-		all(target_arch = "x86_64", feature = "rtl8139"),
-		feature = "virtio-net",
+		feature = "tcp",
+		feature = "udp",
 		feature = "fuse",
 		feature = "vsock",
-		feature = "console",
+		feature = "console"
 	))]
 	#[derive(Debug)]
 	pub enum DriverError {
@@ -73,7 +72,7 @@ pub mod error {
 			),
 			feature = "fuse",
 			feature = "vsock",
-			feature = "console",
+			feature = "console"
 		))]
 		InitVirtioDevFail(VirtioError),
 		#[cfg(all(target_arch = "x86_64", feature = "rtl8139"))]
@@ -90,7 +89,7 @@ pub mod error {
 		),
 		feature = "fuse",
 		feature = "vsock",
-		feature = "console",
+		feature = "console"
 	))]
 	impl From<VirtioError> for DriverError {
 		fn from(err: VirtioError) -> Self {
@@ -113,12 +112,11 @@ pub mod error {
 	}
 
 	#[cfg(any(
-		all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
-		all(target_arch = "x86_64", feature = "rtl8139"),
-		feature = "virtio-net",
+		feature = "tcp",
+		feature = "udp",
 		feature = "fuse",
 		feature = "vsock",
-		feature = "console",
+		feature = "console"
 	))]
 	impl core::fmt::Display for DriverError {
 		#[allow(unused_variables)]
@@ -136,7 +134,7 @@ pub mod error {
 					),
 					feature = "fuse",
 					feature = "vsock",
-					feature = "console",
+					feature = "console"
 				))]
 				DriverError::InitVirtioDevFail(ref err) => {
 					write!(f, "Virtio driver failed: {err:?}")
@@ -173,7 +171,7 @@ pub(crate) fn init() {
 	#[cfg(all(
 		not(feature = "pci"),
 		target_arch = "aarch64",
-		any(feature = "console", feature = "virtio-net"),
+		any(feature = "tcp", feature = "udp", feature = "console")
 	))]
 	crate::arch::aarch64::kernel::mmio::init_drivers();
 

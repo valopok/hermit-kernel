@@ -19,9 +19,7 @@ use pci_types::{
 
 use crate::arch::pci::PciConfigRegion;
 #[cfg(feature = "console")]
-use crate::console::IoDevice;
-#[cfg(feature = "console")]
-use crate::drivers::console::{VirtioConsoleDriver, VirtioUART};
+use crate::drivers::console::VirtioConsoleDriver;
 #[cfg(feature = "fuse")]
 use crate::drivers::fs::virtio_fs::VirtioFsDriver;
 #[cfg(all(target_arch = "x86_64", feature = "rtl8139"))]
@@ -42,7 +40,7 @@ use crate::drivers::nvme::NvmeDriver;
 	),
 	feature = "fuse",
 	feature = "vsock",
-	feature = "console",
+	feature = "console"
 ))]
 use crate::drivers::virtio::transport::pci as pci_virtio;
 #[cfg(any(
@@ -52,7 +50,7 @@ use crate::drivers::virtio::transport::pci as pci_virtio;
 	),
 	feature = "fuse",
 	feature = "vsock",
-	feature = "console",
+	feature = "console"
 ))]
 use crate::drivers::virtio::transport::pci::VirtioDriver;
 #[cfg(feature = "vsock")]
@@ -354,7 +352,29 @@ impl PciDriver {
 	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
 		#[allow(unreachable_patterns)]
 		match self {
+			Self::VirtioNet(drv) => Some(drv),
+			_ => None,
+		}
+	}
+
+	#[cfg(feature = "console")]
+	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
+		#[allow(unreachable_patterns)]
+		match self {
 			Self::VirtioConsole(drv) => Some(drv),
+			_ => None,
+		}
+	}
+
+	#[cfg(all(
+		target_arch = "x86_64",
+		feature = "rtl8139",
+		any(feature = "tcp", feature = "udp")
+	))]
+	fn get_network_driver(&self) -> Option<&InterruptTicketMutex<RTL8139Driver>> {
+		#[allow(unreachable_patterns)]
+		match self {
+			Self::RTL8139Net(drv) => Some(drv),
 			_ => None,
 		}
 	}
@@ -410,11 +430,7 @@ impl PciDriver {
 			}
 			#[cfg(feature = "console")]
 			Self::VirtioConsole(drv) => {
-				fn console_handler() {
-					if let Some(driver) = get_console_driver() {
-						driver.lock().handle_interrupt();
-					}
-				}
+				fn console_handler() {}
 
 				let irq_number = drv.lock().get_interrupt_number();
 				(irq_number, console_handler)
@@ -496,6 +512,14 @@ pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<Virti
 		.find_map(|drv| drv.get_console_driver())
 }
 
+#[cfg(feature = "console")]
+pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<VirtioConsoleDriver>> {
+	PCI_DRIVERS
+		.get()?
+		.iter()
+		.find_map(|drv| drv.get_console_driver())
+}
+
 #[cfg(feature = "nvme")]
 pub(crate) fn get_nvme_driver() -> Option<&'static InterruptTicketMutex<NvmeDriver>> {
 	PCI_DRIVERS
@@ -556,6 +580,15 @@ pub(crate) fn init() {
 					crate::console::CONSOLE
 						.lock()
 						.replace_device(IoDevice::Virtio(VirtioUART::new()));
+				}
+				#[cfg(feature = "console")]
+				Ok(VirtioDriver::Console(drv)) => {
+					register_driver(PciDriver::VirtioConsole(InterruptTicketMutex::new(*drv)));
+					info!("Switch to virtio console");
+					crate::console::CONSOLE
+						.lock()
+						.inner
+						.switch_to_virtio_console();
 				}
 				#[cfg(feature = "vsock")]
 				Ok(VirtioDriver::Vsock(drv)) => {

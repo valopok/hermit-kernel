@@ -10,11 +10,7 @@ use volatile::VolatileRef;
 use crate::arch::aarch64::kernel::interrupts::GIC;
 use crate::arch::aarch64::mm::paging::{self, PageSize};
 #[cfg(feature = "console")]
-use crate::console::IoDevice;
-#[cfg(feature = "console")]
 use crate::drivers::console::VirtioConsoleDriver;
-#[cfg(feature = "console")]
-use crate::drivers::console::VirtioUART;
 #[cfg(any(feature = "tcp", feature = "udp"))]
 use crate::drivers::net::virtio::VirtioNetDriver;
 use crate::drivers::virtio::transport::mmio::{self as mmio_virtio, VirtioDriver};
@@ -26,11 +22,22 @@ use crate::mm::PhysAddr;
 pub(crate) static MMIO_DRIVERS: InitCell<Vec<MmioDriver>> = InitCell::new(Vec::new());
 
 pub(crate) enum MmioDriver {
+	#[cfg(any(feature = "tcp", feature = "udp"))]
+	VirtioNet(InterruptTicketMutex<VirtioNetDriver>),
 	#[cfg(feature = "console")]
 	VirtioConsole(InterruptTicketMutex<VirtioConsoleDriver>),
 }
 
 impl MmioDriver {
+	#[cfg(feature = "console")]
+	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
+		match self {
+			Self::VirtioNet(drv) => Some(drv),
+			#[cfg(feature = "console")]
+			_ => None,
+		}
+	}
+
 	#[cfg(feature = "console")]
 	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
 		match self {
@@ -48,6 +55,14 @@ pub(crate) fn register_driver(drv: MmioDriver) {
 
 #[cfg(any(feature = "tcp", feature = "udp"))]
 pub(crate) type NetworkDevice = VirtioNetDriver;
+
+#[cfg(feature = "console")]
+pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<VirtioConsoleDriver>> {
+	MMIO_DRIVERS
+		.get()?
+		.iter()
+		.find_map(|drv| drv.get_console_driver())
+}
 
 #[cfg(feature = "console")]
 pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<VirtioConsoleDriver>> {
@@ -158,7 +173,9 @@ pub fn init_drivers() {
 										}
 										gic.enable_interrupt(virtio_irqid, Some(cpu_id), true);
 
-										*NETWORK_DEVICE.lock() = Some(drv);
+										register_driver(MmioDriver::VirtioNet(
+											hermit_sync::InterruptTicketMutex::new(drv),
+										));
 									}
 								}
 								#[cfg(feature = "console")]
@@ -226,7 +243,8 @@ pub fn init_drivers() {
 			info!("Switch to virtio console");
 			crate::console::CONSOLE
 				.lock()
-				.replace_device(IoDevice::Virtio(VirtioUART::new()));
+				.inner
+				.switch_to_virtio_console();
 		}
 	}
 }
