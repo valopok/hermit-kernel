@@ -70,9 +70,9 @@ semihosting = ["dep:semihosting"]
 shell = ["simple-shell"]
 smp = []
 strace = []
-tcp = ["net", "smoltcp", "smoltcp/socket-tcp"]
+tcp = ["smoltcp", "smoltcp/socket-tcp"]
 trace = ["smoltcp?/log", "smoltcp?/verbose"]
-udp = ["net", "smoltcp", "smoltcp/socket-udp"]
+udp = ["smoltcp", "smoltcp/socket-udp"]
 vga = []
 virtio = ["dep:virtio"]
 virtio-net = ["net", "virtio"]
@@ -152,18 +152,18 @@ version = "0.12"
 optional = true
 default-features = false
 features = [
-	"alloc",
-	"async",
-	"medium-ethernet",
-	"proto-ipv4",
-	"proto-ipv6",
-	# Enable IP fragmentation
-	"proto-ipv4-fragmentation",
-	"proto-ipv6-fragmentation",
-	#
-	# Assume a MTU size of 9000
-	#"fragmentation-buffer-size-8192",
-	#"reassembly-buffer-size-8192",
+    "alloc",
+    "async",
+    "medium-ethernet",
+    "proto-ipv4",
+    "proto-ipv6",
+    # Enable IP fragmentation
+    "proto-ipv4-fragmentation",
+    "proto-ipv6-fragmentation",
+    #
+    # Assume a MTU size of 9000
+    #"fragmentation-buffer-size-8192",
+    #"reassembly-buffer-size-8192",
 ]
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
