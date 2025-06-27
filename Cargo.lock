@@ -1858,7 +1858,7 @@ dependencies = [
  "byteorder",
  "cfg-if",
  "defmt 0.3.100",
- "heapless 0.8.0",
+ "heapless",
  "log",
  "managed",
 ]
