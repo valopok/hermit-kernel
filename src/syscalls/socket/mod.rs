@@ -17,7 +17,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint};
 
 use crate::errno::Errno;
-#[cfg(feature = "net")]
+#[cfg(any(feature = "tcp", feature = "udp"))]
 use crate::executor::network::{NIC, NetworkState};
 #[cfg(feature = "tcp")]
 use crate::fd::socket::tcp;
@@ -1054,7 +1054,7 @@ pub unsafe extern "C" fn sys_getaddrinfo(
 	_hints: *const addrinfo,
 	_res: *mut *mut addrinfo,
 ) -> i32 {
-	-EINVAL
+	-i32::from(Errno::Inval)
 }
 
 #[hermit_macro::system(errno)]
