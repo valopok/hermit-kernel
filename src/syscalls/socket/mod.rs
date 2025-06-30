@@ -17,7 +17,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint};
 
 use crate::errno::Errno;
-#[cfg(feature = "net")]
+#[cfg(any(feature = "tcp", feature = "udp"))]
 use crate::executor::network::{NIC, NetworkState};
 #[cfg(feature = "tcp")]
 use crate::fd::socket::tcp;
@@ -583,23 +583,8 @@ pub unsafe extern "C" fn sys_getaddrbyname(
 pub extern "C" fn sys_socket(domain: i32, type_: i32, protocol: i32) -> i32 {
 	debug!("sys_socket: domain {domain}, type {type_:?}, protocol {protocol}");
 
-	let Ok(Ok(domain)) = u8::try_from(domain).map(Af::try_from) else {
+	if protocol != 0 {
 		return -i32::from(Errno::Inval);
-	};
-
-	let Some((sock, sock_flags)) = Sock::from_bits(type_) else {
-		return -i32::from(Errno::Inval);
-	};
-
-	let Ok(Ok(proto)) = u8::try_from(protocol).map(Ipproto::try_from) else {
-		return -i32::from(Errno::Inval);
-	};
-
-	match (sock, proto) {
-		(_, Ipproto::Ip | Ipproto::Ipv6)
-		| (Sock::Stream, Ipproto::Tcp)
-		| (Sock::Dgram, Ipproto::Udp) => {}
-		(_, _) => return -i32::from(Errno::Inval),
 	}
 
 	#[cfg(feature = "vsock")]
@@ -738,7 +723,7 @@ pub extern "C" fn sys_listen(fd: i32, backlog: i32) -> i32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sys_bind(fd: i32, name: *const sockaddr, namelen: socklen_t) -> i32 {
 	if name.is_null() {
-		return -i32::from(Errno::Destaddrreq);
+		return -i32::from(Errno::Inval);
 	}
 
 	let Ok(family) = (unsafe { Af::try_from((*name).sa_family) }) else {
@@ -1069,7 +1054,7 @@ pub unsafe extern "C" fn sys_getaddrinfo(
 	_hints: *const addrinfo,
 	_res: *mut *mut addrinfo,
 ) -> i32 {
-	-EINVAL
+	-i32::from(Errno::Inval)
 }
 
 #[hermit_macro::system(errno)]

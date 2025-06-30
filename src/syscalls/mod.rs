@@ -21,8 +21,7 @@ pub use self::spinlock::*;
 pub use self::system::*;
 pub use self::tasks::*;
 pub use self::timer::*;
-use crate::env;
-use crate::errno::{Errno, ToErrno};
+use crate::errno::Errno;
 use crate::executor::block_on;
 use crate::fd::{
 	self, AccessOption, AccessPermission, EventFlags, FileDescriptor, OpenOption, PollFd,
@@ -754,8 +753,38 @@ pub unsafe extern "C" fn sys_getdents64(
 	obj.map_or_else(
 		|_| (-i32::from(Errno::Inval)).into(),
 		|v| {
-			block_on(async { v.read().await.getdents(slice).await }, None)
-				.map_or_else(|e| (-i32::from(e)).into(), |cnt| cnt as i64)
+			block_on((*v).readdir(), None).map_or_else(
+				|e| i64::from(-i32::from(e)),
+				|v| {
+					for i in v.iter() {
+						let len = i.name.len();
+						let aligned_len = ((core::mem::size_of::<Dirent64>() + len + 1)
+							+ (ALIGN_DIRENT - 1)) & (!(ALIGN_DIRENT - 1));
+						if offset as usize + aligned_len >= count {
+							return (-i32::from(Errno::Inval)).into();
+						}
+
+						let dir = unsafe { &mut *dirp };
+
+						dir.d_ino = 0;
+						dir.d_type = 0;
+						dir.d_reclen = aligned_len.try_into().unwrap();
+						offset += i64::try_from(aligned_len).unwrap();
+						dir.d_off = offset;
+
+						// copy null-terminated filename
+						let s = ptr::from_mut(&mut dir.d_name).cast::<u8>();
+						unsafe {
+							core::ptr::copy_nonoverlapping(i.name.as_ptr(), s, len);
+							s.add(len).write_bytes(0, 1);
+						}
+
+						dirp = unsafe { dirp.byte_add(aligned_len) };
+					}
+
+					offset
+				},
+			)
 		},
 	)
 }
