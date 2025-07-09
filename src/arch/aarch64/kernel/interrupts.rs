@@ -171,12 +171,6 @@ pub(crate) extern "C" fn do_irq(_state: &State) -> *mut usize {
 
 		GicV3::end_interrupt(irqid, InterruptGroup::Group1);
 
-		trace!("Disabling floating point");
-
-		// Disable floating point support to trigger a trap instead so we can lazily
-		// restore FPU state
-		CPACR_EL1.modify(CPACR_EL1::FPEN::TrapEl0El1);
-
 		return core_scheduler().scheduler().unwrap_or_default();
 	}
 
