@@ -31,41 +31,6 @@ use crate::env;
 use crate::init_cell::InitCell;
 use crate::mm::physicalmem;
 
-pub(crate) struct Console {}
-
-impl Console {
-	pub fn new() -> Self {
-		CoreLocal::install();
-
-		Self {}
-	}
-
-	pub fn write(&mut self, buf: &[u8]) {
-		for byte in buf {
-			sbi_rt::console_write_byte(*byte);
-		}
-	}
-
-	pub fn read(&mut self) -> Option<u8> {
-		None
-	}
-
-	pub fn is_empty(&self) -> bool {
-		true
-	}
-
-	pub fn register_waker(&mut self, _waker: &Waker) {}
-
-	#[allow(dead_code)]
-	pub fn switch_to_virtio_console(&mut self) {}
-}
-
-impl Default for Console {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
 // Used to store information about available harts. The index of the hart in the vector
 // represents its CpuId and does not need to match its hart_id
 pub(crate) static HARTS_AVAILABLE: InitCell<Vec<usize>> = InitCell::new(Vec::new());

@@ -1,6 +1,4 @@
-use embedded_io::{ErrorType, Read, ReadReady, Write};
-
-use crate::errno::Errno;
+use core::mem::MaybeUninit;
 
 pub(crate) struct SerialDevice;
 
@@ -8,35 +6,18 @@ impl SerialDevice {
 	pub fn new() -> Self {
 		Self {}
 	}
-}
 
-impl ErrorType for SerialDevice {
-	type Error = Errno;
-}
-
-impl Read for SerialDevice {
-	fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-		let _ = buf;
-		Ok(0)
-	}
-}
-
-impl ReadReady for SerialDevice {
-	fn read_ready(&mut self) -> Result<bool, Self::Error> {
-		Ok(false)
-	}
-}
-
-impl Write for SerialDevice {
-	fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+	pub fn write(&self, buf: &[u8]) {
 		for byte in buf {
 			sbi_rt::console_write_byte(*byte);
 		}
-
-		Ok(buf.len())
 	}
 
-	fn flush(&mut self) -> Result<(), Self::Error> {
-		Ok(())
+	pub fn read(&self, _buf: &mut [MaybeUninit<u8>]) -> crate::io::Result<usize> {
+		Ok(0)
+	}
+
+	pub fn can_read(&self) -> bool {
+		false
 	}
 }

@@ -20,7 +20,7 @@ pub struct GenericStdin;
 #[async_trait]
 impl ObjectInterface for GenericStdin {
 	async fn poll(&self, event: PollEvent) -> io::Result<PollEvent> {
-		let available = if CONSOLE.lock().read_ready()? {
+		let available = if CONSOLE.lock().can_read() {
 			PollEvent::POLLIN | PollEvent::POLLRDNORM | PollEvent::POLLRDBAND
 		} else {
 			PollEvent::empty()
@@ -33,8 +33,10 @@ impl ObjectInterface for GenericStdin {
 		future::poll_fn(|cx| {
 			let read_bytes = CONSOLE.lock().read(buf)?;
 			if read_bytes > 0 {
-				CONSOLE.lock().write_all(&buf[..read_bytes])?;
-				CONSOLE.lock().flush()?;
+				unsafe {
+					CONSOLE.lock().write(buf[..read_bytes].assume_init_mut());
+				}
+				CONSOLE.lock().flush();
 				Poll::Ready(Ok(read_bytes))
 			} else {
 				CONSOLE_WAKER.lock().register(cx.waker());
