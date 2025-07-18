@@ -19,7 +19,9 @@ use pci_types::{
 
 use crate::arch::pci::PciConfigRegion;
 #[cfg(feature = "console")]
-use crate::drivers::console::VirtioConsoleDriver;
+use crate::console::IoDevice;
+#[cfg(feature = "console")]
+use crate::drivers::console::{VirtioConsoleDriver, VirtioUART};
 #[cfg(feature = "fuse")]
 use crate::drivers::fs::virtio_fs::VirtioFsDriver;
 #[cfg(all(target_arch = "x86_64", feature = "rtl8139"))]
@@ -430,7 +432,11 @@ impl PciDriver {
 			}
 			#[cfg(feature = "console")]
 			Self::VirtioConsole(drv) => {
-				fn console_handler() {}
+				fn console_handler() {
+					if let Some(driver) = get_console_driver() {
+						driver.lock().handle_interrupt();
+					}
+				}
 
 				let irq_number = drv.lock().get_interrupt_number();
 				(irq_number, console_handler)
@@ -479,17 +485,6 @@ pub(crate) fn get_interrupt_handlers() -> HashMap<InterruptLine, InterruptHandle
 			map.push_back(handler);
 			handlers.insert(irq_number, map);
 		}
-	}
-
-	#[cfg(any(
-		all(target_arch = "x86_64", feature = "rtl8139"),
-		feature = "virtio-net",
-	))]
-	if let Some(device) = NETWORK_DEVICE.lock().as_ref() {
-		handlers
-			.entry(device.get_interrupt_number())
-			.or_default()
-			.push_back(crate::executor::network::network_handler);
 	}
 
 	handlers
@@ -587,8 +582,7 @@ pub(crate) fn init() {
 					info!("Switch to virtio console");
 					crate::console::CONSOLE
 						.lock()
-						.inner
-						.switch_to_virtio_console();
+						.replace_device(IoDevice::Virtio(VirtioUART::new()));
 				}
 				#[cfg(feature = "vsock")]
 				Ok(VirtioDriver::Vsock(drv)) => {
