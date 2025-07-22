@@ -15,6 +15,7 @@ pub mod error {
 		not(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci"))),
 		not(all(target_arch = "x86_64", feature = "rtl8139")),
 		feature = "virtio-net",
+		any(feature = "tcp", feature = "udp")
 	))]
 	pub use crate::drivers::net::virtio::error::VirtioNetError;
 	#[cfg(feature = "pci")]
@@ -38,6 +39,7 @@ pub mod error {
 			not(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci"))),
 			not(all(target_arch = "x86_64", feature = "rtl8139")),
 			feature = "virtio-net",
+			any(feature = "tcp", feature = "udp")
 		))]
 		NetDriver(VirtioNetError),
 		#[cfg(feature = "fuse")]
@@ -96,6 +98,7 @@ pub mod error {
 					not(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci"))),
 					not(all(target_arch = "x86_64", feature = "rtl8139")),
 					feature = "virtio-net",
+					any(feature = "tcp", feature = "udp")
 				))]
 				VirtioError::NetDriver(net_error) => match net_error {
 					#[cfg(feature = "pci")]
