@@ -8,8 +8,13 @@ use ahash::RandomState;
 use hashbrown::HashMap;
 use hermit_sync::without_interrupts;
 #[cfg(any(
-	feature = "tcp",
-	feature = "udp",
+	all(
+		any(feature = "tcp", feature = "udp"),
+		any(
+			all(target_arch = "x86_64", feature = "rtl8139"),
+			feature = "virtio-net",
+		)
+	),
 	feature = "fuse",
 	feature = "vsock",
 	feature = "nvme"
@@ -34,6 +39,7 @@ use crate::drivers::fs::virtio_fs::VirtioFsDriver;
 use crate::drivers::net::rtl8139::{self, RTL8139Driver};
 #[cfg(all(
 	not(all(target_arch = "x86_64", feature = "rtl8139")),
+	feature = "virtio-net",
 	any(feature = "tcp", feature = "udp")
 ))]
 use crate::drivers::net::virtio::VirtioNetDriver;
@@ -44,6 +50,7 @@ use crate::drivers::nvme::NvmeDriver;
 #[cfg(any(
 	all(
 		any(feature = "tcp", feature = "udp"),
+		feature = "virtio-net",
 		not(all(target_arch = "x86_64", feature = "rtl8139"))
 	),
 	feature = "fuse",
@@ -54,7 +61,8 @@ use crate::drivers::virtio::transport::pci as pci_virtio;
 #[cfg(any(
 	all(
 		any(feature = "tcp", feature = "udp"),
-		not(all(target_arch = "x86_64", feature = "rtl8139"))
+		feature = "virtio-net",
+		not(all(target_arch = "x86_64", feature = "rtl8139")),
 	),
 	feature = "fuse",
 	feature = "vsock",
@@ -338,6 +346,7 @@ pub(crate) fn print_information() {
 
 #[allow(clippy::large_enum_variant)]
 #[allow(clippy::enum_variant_names)]
+#[non_exhaustive]
 pub(crate) enum PciDriver {
 	#[cfg(feature = "fuse")]
 	VirtioFs(InterruptTicketMutex<VirtioFsDriver>),
@@ -347,6 +356,7 @@ pub(crate) enum PciDriver {
 	VirtioVsock(InterruptTicketMutex<VirtioVsockDriver>),
 	#[cfg(all(
 		not(all(target_arch = "x86_64", feature = "rtl8139")),
+		feature = "virtio-net",
 		any(feature = "tcp", feature = "udp")
 	))]
 	VirtioNet(InterruptTicketMutex<VirtioNetDriver>),
@@ -363,6 +373,7 @@ pub(crate) enum PciDriver {
 impl PciDriver {
 	#[cfg(all(
 		not(all(target_arch = "x86_64", feature = "rtl8139")),
+		feature = "virtio-net",
 		any(feature = "tcp", feature = "udp")
 	))]
 	fn get_network_driver(&self) -> Option<&InterruptTicketMutex<VirtioNetDriver>> {
@@ -454,6 +465,7 @@ impl PciDriver {
 			}
 			#[cfg(all(
 				not(all(target_arch = "x86_64", feature = "rtl8139")),
+				feature = "virtio-net",
 				any(feature = "tcp", feature = "udp")
 			))]
 			Self::VirtioNet(drv) => {
@@ -537,6 +549,7 @@ pub(crate) fn get_interrupt_handlers() -> HashMap<InterruptLine, InterruptHandle
 
 #[cfg(all(
 	not(all(target_arch = "x86_64", feature = "rtl8139")),
+	feature = "virtio-net",
 	any(feature = "tcp", feature = "udp")
 ))]
 pub(crate) fn get_network_driver() -> Option<&'static InterruptTicketMutex<VirtioNetDriver>> {
@@ -605,6 +618,7 @@ pub(crate) fn init() {
 			#[cfg(any(
 				all(
 					any(feature = "tcp", feature = "udp"),
+					feature = "virtio-net",
 					not(all(target_arch = "x86_64", feature = "rtl8139"))
 				),
 				feature = "fuse",
@@ -614,6 +628,7 @@ pub(crate) fn init() {
 			match pci_virtio::init_device(adapter) {
 				#[cfg(all(
 					not(all(target_arch = "x86_64", feature = "rtl8139")),
+					feature = "virtio-net",
 					any(feature = "tcp", feature = "udp")
 				))]
 				Ok(VirtioDriver::Network(drv)) => {

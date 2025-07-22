@@ -13,7 +13,12 @@ pub mod pci;
 #[cfg(feature = "nvme")]
 pub mod nvme;
 #[cfg(any(
-	all(any(feature = "tcp", feature = "udp"), not(feature = "rtl8139")),
+	all(
+		not(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci"))),
+		not(all(target_arch = "x86_64", feature = "rtl8139")),
+		feature = "virtio-net",
+		any(feature = "tcp", feature = "udp"),
+	),
 	feature = "fuse",
 	feature = "vsock",
 	feature = "console"
@@ -35,12 +40,17 @@ pub(crate) type InterruptHandlerQueue = VecDeque<fn()>;
 /// [DriverError](error::DriverError) values will be
 /// passed on to higher layers.
 pub mod error {
-	#[cfg(all(target_arch = "riscv64", feature = "gem-net"))]
+	#[cfg(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")))]
 	use crate::drivers::net::gem::GEMError;
 	#[cfg(all(target_arch = "x86_64", feature = "rtl8139"))]
 	use crate::drivers::net::rtl8139::RTL8139Error;
 	#[cfg(any(
-		all(any(feature = "tcp", feature = "udp"), not(feature = "rtl8139")),
+		all(
+			not(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci"))),
+			not(all(target_arch = "x86_64", feature = "rtl8139")),
+			feature = "virtio-net",
+			any(feature = "tcp", feature = "udp"),
+		),
 		feature = "fuse",
 		feature = "vsock",
 		feature = "console"
@@ -48,8 +58,14 @@ pub mod error {
 	use crate::drivers::virtio::error::VirtioError;
 
 	#[cfg(any(
-		feature = "tcp",
-		feature = "udp",
+		all(
+			any(
+				all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+				all(target_arch = "x86_64", feature = "rtl8139"),
+				feature = "virtio-net",
+			),
+			any(feature = "tcp", feature = "udp"),
+		),
 		feature = "fuse",
 		feature = "vsock",
 		feature = "console"
@@ -57,7 +73,12 @@ pub mod error {
 	#[derive(Debug)]
 	pub enum DriverError {
 		#[cfg(any(
-			all(any(feature = "tcp", feature = "udp"), not(feature = "rtl8139")),
+			all(
+				not(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci"))),
+				not(all(target_arch = "x86_64", feature = "rtl8139")),
+				feature = "virtio-net",
+				any(feature = "tcp", feature = "udp"),
+			),
 			feature = "fuse",
 			feature = "vsock",
 			feature = "console"
@@ -65,12 +86,17 @@ pub mod error {
 		InitVirtioDevFail(VirtioError),
 		#[cfg(all(target_arch = "x86_64", feature = "rtl8139"))]
 		InitRTL8139DevFail(RTL8139Error),
-		#[cfg(all(target_arch = "riscv64", feature = "gem-net"))]
+		#[cfg(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")))]
 		InitGEMDevFail(GEMError),
 	}
 
 	#[cfg(any(
-		all(any(feature = "tcp", feature = "udp"), not(feature = "rtl8139")),
+		all(
+			not(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci"))),
+			not(all(target_arch = "x86_64", feature = "rtl8139")),
+			feature = "virtio-net",
+			any(feature = "tcp", feature = "udp"),
+		),
 		feature = "fuse",
 		feature = "vsock",
 		feature = "console"
@@ -88,7 +114,7 @@ pub mod error {
 		}
 	}
 
-	#[cfg(all(target_arch = "riscv64", feature = "gem-net"))]
+	#[cfg(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")))]
 	impl From<GEMError> for DriverError {
 		fn from(err: GEMError) -> Self {
 			DriverError::InitGEMDevFail(err)
@@ -96,8 +122,14 @@ pub mod error {
 	}
 
 	#[cfg(any(
-		feature = "tcp",
-		feature = "udp",
+		all(
+			any(
+				all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+				all(target_arch = "x86_64", feature = "rtl8139"),
+				feature = "virtio-net",
+			),
+			any(feature = "tcp", feature = "udp"),
+		),
 		feature = "fuse",
 		feature = "vsock",
 		feature = "console"
@@ -107,7 +139,16 @@ pub mod error {
 		fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
 			match *self {
 				#[cfg(any(
-					all(any(feature = "tcp", feature = "udp"), not(feature = "rtl8139")),
+					all(
+						not(all(
+							target_arch = "riscv64",
+							feature = "gem-net",
+							not(feature = "pci")
+						)),
+						not(all(target_arch = "x86_64", feature = "rtl8139")),
+						feature = "virtio-net",
+						any(feature = "tcp", feature = "udp"),
+					),
 					feature = "fuse",
 					feature = "vsock",
 					feature = "console"
@@ -119,7 +160,7 @@ pub mod error {
 				DriverError::InitRTL8139DevFail(ref err) => {
 					write!(f, "RTL8139 driver failed: {err:?}")
 				}
-				#[cfg(all(target_arch = "riscv64", feature = "gem-net"))]
+				#[cfg(all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")))]
 				DriverError::InitGEMDevFail(ref err) => {
 					write!(f, "GEM driver failed: {err:?}")
 				}
@@ -145,13 +186,17 @@ pub(crate) fn init() {
 	#[cfg(all(
 		not(feature = "pci"),
 		target_arch = "x86_64",
+		feature = "virtio-net",
 		any(feature = "tcp", feature = "udp")
 	))]
 	crate::arch::x86_64::kernel::mmio::init_drivers();
 	#[cfg(all(
 		not(feature = "pci"),
 		target_arch = "aarch64",
-		any(feature = "tcp", feature = "udp", feature = "console")
+		any(
+			feature = "console",
+			all(feature = "virtio-net", any(feature = "tcp", feature = "udp"))
+		)
 	))]
 	crate::arch::aarch64::kernel::mmio::init_drivers();
 
