@@ -74,7 +74,7 @@ cfg_if::cfg_if! {
 		any(
 			all(target_arch = "riscv64", feature = "gem-net"),
 			feature = "virtio-net",
-		),
+		)
 	))] {
 		pub(crate) use crate::arch::kernel::mmio::NetworkDevice;
 	} else if #[cfg(all(
@@ -82,7 +82,7 @@ cfg_if::cfg_if! {
 		any(
 			all(target_arch = "x86_64", feature = "rtl8139"),
 			feature = "virtio-net",
-		),
+		)
 	))] {
 		pub(crate) use crate::drivers::pci::NetworkDevice;
 	} else {

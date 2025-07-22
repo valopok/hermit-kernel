@@ -1,4 +1,13 @@
-#[cfg(any(feature = "tcp", feature = "udp", feature = "console"))]
+#[cfg(any(
+	feature = "console",
+	all(
+		any(
+			all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+			feature = "virtio-net",
+		),
+		any(feature = "tcp", feature = "udp")
+	)
+))]
 use alloc::collections::VecDeque;
 
 use ahash::RandomState;
@@ -6,10 +15,33 @@ use hashbrown::HashMap;
 
 #[cfg(feature = "console")]
 pub(crate) use crate::arch::kernel::mmio::get_console_driver;
-#[cfg(any(feature = "tcp", feature = "udp"))]
+#[cfg(all(
+	any(
+		all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+		feature = "virtio-net",
+	),
+	any(feature = "tcp", feature = "udp")
+))]
 pub(crate) use crate::arch::kernel::mmio::get_network_driver;
-#[cfg(any(feature = "tcp", feature = "udp", feature = "console"))]
+#[cfg(any(
+	feature = "console",
+	all(
+		any(
+			all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+			feature = "virtio-net",
+		),
+		any(feature = "tcp", feature = "udp")
+	)
+))]
 use crate::drivers::Driver;
+#[cfg(all(
+	any(
+		all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+		feature = "virtio-net",
+	),
+	any(feature = "tcp", feature = "udp")
+))]
+use crate::drivers::net::NetworkDriver;
 use crate::drivers::{InterruptHandlerQueue, InterruptLine};
 #[cfg(any(
 	all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
@@ -23,21 +55,16 @@ pub(crate) fn get_interrupt_handlers() -> HashMap<InterruptLine, InterruptHandle
 	let mut handlers: HashMap<InterruptLine, InterruptHandlerQueue, RandomState> =
 		HashMap::with_hasher(RandomState::with_seeds(0, 0, 0, 0));
 
-	#[cfg(any(
-		all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
-		feature = "virtio-net",
+	#[cfg(all(
+		any(
+			all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+			feature = "virtio-net",
+		),
+		any(feature = "tcp", feature = "udp")
 	))]
-	if let Some(device) = NETWORK_DEVICE.lock().as_ref() {
-		handlers
-			.entry(device.get_interrupt_number())
-			.or_default()
-			.push_back(crate::executor::network::network_handler);
-	}
-
-	#[cfg(feature = "console")]
-	if let Some(drv) = get_console_driver() {
-		fn console_handler() {
-			if let Some(driver) = get_console_driver() {
+	if let Some(drv) = get_network_driver() {
+		fn network_handler() {
+			if let Some(driver) = get_network_driver() {
 				driver.lock().handle_interrupt();
 			}
 		}
