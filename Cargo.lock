@@ -2097,7 +2097,7 @@ version = "0.1.0"
 source = "git+https://github.com/valopok/vroom?branch=main#b5e9c7f9debccc0b803a489a8177822abd183d9d"
 dependencies = [
  "ahash",
- "hashbrown 0.15.4",
+ "hashbrown 0.15.5",
  "log",
 ]
 

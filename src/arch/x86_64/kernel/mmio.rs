@@ -24,7 +24,14 @@ use crate::drivers::net::virtio::VirtioNetDriver;
 use crate::drivers::virtio::transport::mmio as mmio_virtio;
 use crate::drivers::virtio::transport::mmio::VirtioDriver;
 use crate::env;
-#[cfg(any(feature = "rtl8139", feature = "virtio-net"))]
+#[cfg(all(
+	any(
+		all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+		all(target_arch = "x86_64", feature = "rtl8139"),
+		feature = "virtio-net",
+	),
+	any(feature = "tcp", feature = "udp")
+))]
 use crate::executor::device::NETWORK_DEVICE;
 use crate::init_cell::InitCell;
 use crate::mm::physicalmem::PHYSICAL_FREE_LIST;
@@ -39,21 +46,11 @@ const IRQ_NUMBER: u8 = 44 - 32;
 static MMIO_DRIVERS: InitCell<Vec<MmioDriver>> = InitCell::new(Vec::new());
 
 pub(crate) enum MmioDriver {
-	#[cfg(any(feature = "tcp", feature = "udp"))]
-	VirtioNet(InterruptTicketMutex<VirtioNetDriver>),
 	#[cfg(feature = "console")]
 	VirtioConsole(InterruptTicketMutex<VirtioConsoleDriver>),
 }
 
 impl MmioDriver {
-	#[allow(unreachable_patterns)]
-	#[cfg(any(feature = "tcp", feature = "udp"))]
-	fn get_network_driver(&self) -> Option<&InterruptTicketMutex<VirtioNetDriver>> {
-		match self {
-			Self::VirtioConsole(drv) => Some(drv),
-		}
-	}
-
 	#[allow(unreachable_patterns)]
 	#[cfg(feature = "console")]
 	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
@@ -235,12 +232,7 @@ pub(crate) fn register_driver(drv: MmioDriver) {
 }
 
 #[cfg(any(feature = "tcp", feature = "udp"))]
-pub(crate) fn get_network_driver() -> Option<&'static InterruptTicketMutex<VirtioNetDriver>> {
-	MMIO_DRIVERS
-		.get()?
-		.iter()
-		.find_map(|drv| drv.get_console_driver())
-}
+pub(crate) type NetworkDevice = VirtioNetDriver;
 
 #[cfg(feature = "console")]
 pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<VirtioConsoleDriver>> {

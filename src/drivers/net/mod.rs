@@ -25,6 +25,14 @@ use crate::drivers::Driver;
 pub(crate) trait NetworkDriver: Driver + smoltcp::phy::Device {
 	/// Returns the mac address of the device.
 	fn get_mac_address(&self) -> [u8; 6];
+	/// Returns the current MTU of the device.
+	fn get_mtu(&self) -> u16;
+	/// Get buffer with the received packet
+	fn receive_packet(&mut self) -> Option<(RxToken, TxToken<'_>)>;
+	/// Send packet with the size `len`
+	fn send_packet<R, F>(&mut self, len: usize, f: F) -> R
+	where
+		F: FnOnce(&mut [u8]) -> R;
 	/// Check if a packet is available
 	#[allow(dead_code)]
 	fn has_packet(&self) -> bool;

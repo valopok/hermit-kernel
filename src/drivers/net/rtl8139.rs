@@ -417,6 +417,48 @@ impl NetworkDriver for RTL8139Driver {
 		false
 	}
 
+	/// Get buffer with the received packet
+	fn receive_packet(&mut self) -> Option<(RxToken, TxToken<'_>)> {
+		let cmd = unsafe { Port::<u8>::new(self.iobase + CR).read() };
+
+		if (cmd & CR_BUFE) == CR_BUFE {
+			return None;
+		}
+
+		let header = self.rx_peek_u16();
+		self.advance_rxpos(mem::size_of::<u16>());
+
+		if header & ISR_ROK != ISR_ROK {
+			warn!(
+				"RTL8192: invalid header {:#x}, rx_pos {}\n",
+				header, self.rxpos
+			);
+
+			return None;
+		}
+
+		let length = self.rx_peek_u16() - 4; // copy packet (but not the CRC)
+		let pos = (self.rxpos + mem::size_of::<u16>()) % RX_BUF_LEN;
+
+		let mut vec_data = Vec::with_capacity_in(length as usize, DeviceAlloc);
+
+		// do we reach the end of the receive buffers?
+		// in this case, we contact the two slices to one vec
+		if pos + length as usize > RX_BUF_LEN {
+			let first = &self.rxbuffer[pos..RX_BUF_LEN];
+			let second = &self.rxbuffer[..length as usize - first.len()];
+
+			vec_data.extend_from_slice(first);
+			vec_data.extend_from_slice(second);
+		} else {
+			vec_data.extend_from_slice(&self.rxbuffer[pos..][..length.into()]);
+		};
+
+		self.consume_current_buffer();
+
+		Some((RxToken::new(vec_data), TxToken::new(self)))
+	}
+
 	fn set_polling_mode(&mut self, value: bool) {
 		if value {
 			unsafe {

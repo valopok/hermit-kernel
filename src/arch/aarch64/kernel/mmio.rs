@@ -18,7 +18,14 @@ use crate::drivers::console::VirtioUART;
 #[cfg(any(feature = "tcp", feature = "udp"))]
 use crate::drivers::net::virtio::VirtioNetDriver;
 use crate::drivers::virtio::transport::mmio::{self as mmio_virtio, VirtioDriver};
-#[cfg(feature = "virtio-net")]
+#[cfg(all(
+	any(
+		all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+		all(target_arch = "x86_64", feature = "rtl8139"),
+		feature = "virtio-net",
+	),
+	any(feature = "tcp", feature = "udp")
+))]
 use crate::executor::device::NETWORK_DEVICE;
 use crate::init_cell::InitCell;
 use crate::mm::PhysAddr;
@@ -26,22 +33,11 @@ use crate::mm::PhysAddr;
 pub(crate) static MMIO_DRIVERS: InitCell<Vec<MmioDriver>> = InitCell::new(Vec::new());
 
 pub(crate) enum MmioDriver {
-	#[cfg(any(feature = "tcp", feature = "udp"))]
-	VirtioNet(InterruptTicketMutex<VirtioNetDriver>),
 	#[cfg(feature = "console")]
 	VirtioConsole(InterruptTicketMutex<VirtioConsoleDriver>),
 }
 
 impl MmioDriver {
-	#[cfg(feature = "console")]
-	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
-		match self {
-			Self::VirtioNet(drv) => Some(drv),
-			#[cfg(feature = "console")]
-			_ => None,
-		}
-	}
-
 	#[cfg(feature = "console")]
 	fn get_console_driver(&self) -> Option<&InterruptTicketMutex<VirtioConsoleDriver>> {
 		match self {
@@ -57,16 +53,8 @@ pub(crate) fn register_driver(drv: MmioDriver) {
 	MMIO_DRIVERS.with(|mmio_drivers| mmio_drivers.unwrap().push(drv));
 }
 
-#[cfg(feature = "virtio-net")]
+#[cfg(any(feature = "tcp", feature = "udp"))]
 pub(crate) type NetworkDevice = VirtioNetDriver;
-
-#[cfg(feature = "console")]
-pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<VirtioConsoleDriver>> {
-	MMIO_DRIVERS
-		.get()?
-		.iter()
-		.find_map(|drv| drv.get_console_driver())
-}
 
 #[cfg(feature = "console")]
 pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<VirtioConsoleDriver>> {
@@ -177,9 +165,7 @@ pub fn init_drivers() {
 										}
 										gic.enable_interrupt(virtio_irqid, Some(cpu_id), true);
 
-										register_driver(MmioDriver::VirtioNet(
-											hermit_sync::InterruptTicketMutex::new(drv),
-										));
+										*NETWORK_DEVICE.lock() = Some(drv);
 									}
 								}
 								#[cfg(feature = "console")]

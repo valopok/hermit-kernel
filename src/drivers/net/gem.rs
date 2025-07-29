@@ -252,6 +252,39 @@ impl NetworkDriver for GEMDriver {
 		self.next_rx_index().is_some()
 	}
 
+	fn receive_packet(&mut self) -> Option<(RxToken, TxToken<'_>)> {
+		debug!("receive_rx_buffer");
+
+		// Scan the buffer descriptor queue starting from rx_count
+		match self.next_rx_index() {
+			Some(index) => {
+				let word1_addr = self.rxbuffer_list + u64::from(index * 8 + 4);
+				let word1_entry =
+					unsafe { core::ptr::read_volatile(word1_addr.as_mut_ptr::<u32>()) };
+				let length = word1_entry & 0x1fff;
+				debug!("Received frame in buffer {index}, length: {length}");
+
+				// Starting point to search for next frame
+				self.rx_counter = (index + 1) % RX_BUF_NUM;
+				// SAFETY: This is a blatant lie and very unsound.
+				// The API must be fixed or the buffer may never touched again.
+				let buffer = unsafe {
+					core::slice::from_raw_parts_mut(
+						(self.rxbuffer.as_usize() + (index * RX_BUF_LEN) as usize) as *mut u8,
+						length as usize,
+					)
+				};
+				trace!("BUFFER: {buffer:x?}");
+				self.rx_buffer_consumed(index as usize);
+				Some((
+					RxToken::new(buffer.to_vec_in(DeviceAlloc)),
+					TxToken::new(self),
+				))
+			}
+			None => None,
+		}
+	}
+
 	fn set_polling_mode(&mut self, value: bool) {
 		debug!("set_polling_mode");
 		if value {

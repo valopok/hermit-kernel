@@ -19,7 +19,7 @@ use hermit_sync::without_interrupts;
 #[cfg(feature = "net")]
 use smoltcp::time::Instant;
 
-use crate::arch::core_local;
+use crate::arch::core_local::*;
 use crate::errno::Errno;
 use crate::executor::task::AsyncTask;
 use crate::io;
@@ -180,6 +180,10 @@ where
 						delay.map(|d| crate::arch::processor::get_timer_ticks() + d),
 					);
 				}
+
+				if let Ok(device) = crate::executor::network::NIC.lock().as_nic_mut() {
+					device.set_polling_mode(false);
+				}
 			}
 
 			return t;
@@ -203,6 +207,10 @@ where
 					core_local::core_scheduler().add_network_timer(
 						delay.map(|d| crate::arch::processor::get_timer_ticks() + d),
 					);
+				}
+
+				if let Ok(device) = crate::executor::network::NIC.lock().as_nic_mut() {
+					device.set_polling_mode(false);
 				}
 			}
 
@@ -231,12 +239,17 @@ where
 				let wakeup_time =
 					timeout.map(|duration| start + u64::try_from(duration.as_micros()).unwrap());
 
+				// allow network interrupts
+				if let Ok(device) = crate::executor::network::NIC.lock().as_nic_mut() {
+					device.set_polling_mode(false);
+				}
+
 				// switch to another task
 				task_notify.wait(wakeup_time);
 
 				// restore default values
-				if let Ok(nic) = crate::executor::network::NIC.lock().as_nic_mut() {
-					nic.set_polling_mode(true);
+				if let Ok(device) = crate::executor::network::NIC.lock().as_nic_mut() {
+					device.set_polling_mode(true);
 				}
 
 				backoff.reset();

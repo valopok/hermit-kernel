@@ -2,10 +2,6 @@ use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use hermit_sync::SpinMutex;
-use smoltcp::phy;
-use smoltcp::time::Instant;
-
 use crate::drivers::net::NetworkDriver;
 use crate::drivers::{Driver, InterruptLine};
 use crate::mm::device_alloc::DeviceAlloc;
@@ -40,8 +36,19 @@ pub(crate) struct TxToken<'a> {
 	queue: &'a SpinMutex<VecDeque<Vec<u8, DeviceAlloc>>>,
 }
 
-impl smoltcp::phy::TxToken for TxToken<'_> {
-	fn consume<R, F>(self, len: usize, f: F) -> R
+	fn get_mtu(&self) -> u16 {
+		// Technically Linux uses 2^16, which we cannot use until we switch
+		// to u32 for MTU
+		u16::MAX
+	}
+
+	fn receive_packet(&mut self) -> Option<(RxToken, TxToken<'_>)> {
+		self.0
+			.pop_front()
+			.map(move |buffer| (RxToken::new(buffer), TxToken::new(self)))
+	}
+
+	fn send_packet<R, F>(&mut self, len: usize, f: F) -> R
 	where
 		F: FnOnce(&mut [u8]) -> R,
 	{

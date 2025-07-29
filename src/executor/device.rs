@@ -17,7 +17,8 @@ use smoltcp::wire::{IpCidr, Ipv4Address, Ipv4Cidr};
 
 use super::network::{NetworkInterface, NetworkState};
 use crate::arch;
-use crate::drivers::net::NetworkDriver;
+use crate::drivers::net::{NetworkDevice, NetworkDriver};
+use crate::mm::device_alloc::DeviceAlloc;
 
 cfg_if! {
 	if #[cfg(any(
@@ -26,11 +27,45 @@ cfg_if! {
 		feature = "virtio-net",
 	))] {
 		use hermit_sync::SpinMutex;
-		use crate::drivers::net::NetworkDevice;
 
 		pub(crate) static NETWORK_DEVICE: SpinMutex<Option<NetworkDevice>> = SpinMutex::new(Option::None);
 	} else {
 		use crate::drivers::net::loopback::LoopbackDriver;
+	}
+}
+
+/// Data type to determine the mac address
+#[repr(C)]
+pub(crate) struct HermitNet {
+	mtu: u16,
+	checksums: ChecksumCapabilities,
+	device: NetworkDevice,
+}
+
+impl HermitNet {
+	pub(crate) const fn new(
+		mtu: u16,
+		checksums: ChecksumCapabilities,
+		device: NetworkDevice,
+	) -> Self {
+		Self {
+			mtu,
+			checksums,
+			device,
+		}
+	}
+
+	#[cfg(any(
+		all(target_arch = "riscv64", feature = "gem-net", not(feature = "pci")),
+		all(target_arch = "x86_64", feature = "rtl8139"),
+		feature = "virtio-net",
+	))]
+	pub(crate) fn handle_interrupt(&mut self) {
+		self.device.handle_interrupt();
+	}
+
+	pub(crate) fn set_polling_mode(&mut self, value: bool) {
+		self.device.set_polling_mode(value);
 	}
 }
 
@@ -43,20 +78,26 @@ impl<'a> NetworkInterface<'a> {
 				all(target_arch = "x86_64", feature = "rtl8139"),
 				feature = "virtio-net",
 			))] {
-				#[cfg_attr(feature = "trace", expect(unused_mut))]
-				let Some(mut device) = NETWORK_DEVICE.lock().take() else {
+				let Some(device) = NETWORK_DEVICE.lock().take() else {
 					return NetworkState::InitializationFailed;
 				};
 			} else {
-				#[cfg_attr(feature = "trace", expect(unused_mut))]
-				let mut device = LoopbackDriver::new();
+				let device = LoopbackDriver::new();
 			}
 		}
 
-		let mac = device.get_mac_address();
+		let (mtu, mac, checksums) = (
+			device.get_mtu(),
+			device.get_mac_address(),
+			device.get_checksums(),
+		);
 
-		#[cfg(feature = "trace")]
-		let mut device = Tracer::new(device, |timestamp, printer| trace!("{timestamp} {printer}"));
+		let mut device = {
+			let device = HermitNet::new(mtu, checksums.clone(), device);
+			#[cfg(feature = "trace")]
+			let device = Tracer::new(device, |timestamp, printer| trace!("{timestamp} {printer}"));
+			device
+		};
 
 		if hermit_var!("HERMIT_IP").is_some() {
 			warn!(
@@ -103,20 +144,26 @@ impl<'a> NetworkInterface<'a> {
 				all(target_arch = "x86_64", feature = "rtl8139"),
 				feature = "virtio-net",
 			))] {
-				#[cfg_attr(feature = "trace", expect(unused_mut))]
-				let Some(mut device) = NETWORK_DEVICE.lock().take() else {
+				let Some(device) = NETWORK_DEVICE.lock().take() else {
 					return NetworkState::InitializationFailed;
 				};
 			} else {
-				#[cfg_attr(feature = "trace", expect(unused_mut))]
-				let mut device = LoopbackDriver::new();
+				let device = LoopbackDriver::new();
 			}
 		}
 
-		let mac = device.get_mac_address();
+		let (mtu, mac, checksums) = (
+			device.get_mtu(),
+			device.get_mac_address(),
+			device.get_checksums(),
+		);
 
-		#[cfg(feature = "trace")]
-		let mut device = Tracer::new(device, |timestamp, printer| trace!("{timestamp} {printer}"));
+		let mut device = {
+			let device = HermitNet::new(mtu, checksums.clone(), device);
+			#[cfg(feature = "trace")]
+			let device = Tracer::new(device, |timestamp, printer| trace!("{timestamp} {printer}"));
+			device
+		};
 
 		let myip = Ipv4Address::from_str(hermit_var_or!("HERMIT_IP", "10.0.5.3")).unwrap();
 		let mygw = Ipv4Address::from_str(hermit_var_or!("HERMIT_GATEWAY", "10.0.5.1")).unwrap();
@@ -169,5 +216,66 @@ impl<'a> NetworkInterface<'a> {
 			#[cfg(feature = "dns")]
 			dns_handle: Some(dns_handle),
 		}))
+	}
+}
+
+impl Device for HermitNet {
+	type RxToken<'a> = RxToken;
+	type TxToken<'a> = TxToken<'a>;
+
+	fn capabilities(&self) -> DeviceCapabilities {
+		let mut cap = DeviceCapabilities::default();
+		cap.max_transmission_unit = self.mtu.into();
+		cap.max_burst_size = Some(0x10000 / cap.max_transmission_unit);
+		cap.checksum = self.checksums.clone();
+		cap
+	}
+
+	fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+		self.device.receive_packet()
+	}
+
+	fn transmit(&mut self, _timestamp: Instant) -> Option<Self::TxToken<'_>> {
+		Some(TxToken::new(&mut self.device))
+	}
+}
+
+#[doc(hidden)]
+pub(crate) struct RxToken {
+	buffer: Vec<u8, DeviceAlloc>,
+}
+
+impl RxToken {
+	pub(crate) fn new(buffer: Vec<u8, DeviceAlloc>) -> Self {
+		Self { buffer }
+	}
+}
+
+impl phy::RxToken for RxToken {
+	fn consume<R, F>(self, f: F) -> R
+	where
+		F: FnOnce(&[u8]) -> R,
+	{
+		f(&self.buffer[..])
+	}
+}
+
+#[doc(hidden)]
+pub(crate) struct TxToken<'a> {
+	device: &'a mut NetworkDevice,
+}
+
+impl<'a> TxToken<'a> {
+	pub(crate) fn new(device: &'a mut NetworkDevice) -> Self {
+		Self { device }
+	}
+}
+
+impl<'a> phy::TxToken for TxToken<'a> {
+	fn consume<R, F>(self, len: usize, f: F) -> R
+	where
+		F: FnOnce(&mut [u8]) -> R,
+	{
+		self.device.send_packet(len, f)
 	}
 }
