@@ -132,7 +132,6 @@ hermit-sync = "0.1"
 lock_api = "0.4"
 log = { version = "0.4", default-features = false }
 num_enum = { version = "0.7", default-features = false }
-nvme = "0.2.2"
 pci-ids = { version = "0.2", optional = true }
 pci_types = { version = "0.10" }
 rand_chacha = { version = "0.9", default-features = false }
@@ -144,7 +143,7 @@ talc = { version = "4" }
 thiserror = { version = "2", default-features = false }
 time = { version = "0.3", default-features = false }
 volatile = "0.6"
-vroom = { git = "https://github.com/valopok/vroom", branch = "main", default-features = false, optional = true }
+vroom = { git = "https://github.com/valopok/vroom", branch = "hermit", default-features = false }
 zerocopy = { version = "0.8", default-features = false }
 uhyve-interface = "0.1.3"
 
