@@ -7,11 +7,9 @@ use ahash::RandomState;
 use hashbrown::HashMap;
 use hermit_sync::{InterruptTicketMutex, Lazy};
 use memory_addresses::VirtAddr;
-use nvme;
 use pci_types::InterruptLine;
 use vroom::{Dma, IoQueuePair, IoQueuePairId, Namespace, NamespaceId, NvmeDevice};
 
-use crate::alloc::borrow::ToOwned;
 use crate::arch::mm::paging::{virtual_to_physical, BasePageSize, PageSize};
 use crate::arch::pci::PciConfigRegion;
 use crate::drivers::pci::PciDevice;
@@ -252,11 +250,8 @@ impl NvmeDriver {
 		Ok(())
 	}
 
-	pub(crate) fn get_number_of_namespaces(&mut self) -> Result<usize, SysNvmeError> {
-		self.controller
-			.identify_namespaces(0)
-			.map(|nss| nss.len())
-			.map_err(|_| SysNvmeError::CouldNotIdentifyNamespaces)
+	pub(crate) fn namespace_ids(&self) -> Vec<NamespaceId> {
+		self.device.lock().namespace_ids()
 	}
 
 	/// Gets the size of a namespace in bytes.
@@ -319,18 +314,48 @@ impl NvmeDriver {
 		&mut self,
 		io_queue_pair_id: usize,
 	) -> Result<(), SysNvmeError> {
+		let mut device = self.device.lock();
 		let io_queue_pair = self
 			.io_queue_pairs
 			.lock()
 			.remove(&io_queue_pair_id)
 			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
-		self.controller
+		device
 			.delete_io_queue_pair(io_queue_pair)
-			.map_err(|_| SysNvmeError::CouldNotDeleteIoQueuePair)
+			.map_err(|_error| SysNvmeError::CouldNotDeleteIoQueuePair)
 	}
 
-	/// Reads from an IO queue pair into a buffer starting from a Logical Block Address.
-	pub(crate) fn read_from_io_queue_pair(
+	pub(crate) fn allocate_buffer<T>(
+		&self,
+		io_queue_pair_id: &IoQueuePairId,
+		number_of_elements: usize,
+	) -> Result<Dma<T>, SysNvmeError> {
+		let mut io_queue_pairs = self.io_queue_pairs.lock();
+		let io_queue_pair = io_queue_pairs
+			.get_mut(io_queue_pair_id)
+			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
+		io_queue_pair
+			.allocate_buffer(number_of_elements)
+			.map_err(|_error| SysNvmeError::Other)
+	}
+
+	pub(crate) fn deallocate_buffer<T>(
+		&self,
+		io_queue_pair_id: &IoQueuePairId,
+		buffer: Dma<T>,
+	) -> Result<(), SysNvmeError> {
+		let mut io_queue_pairs = self.io_queue_pairs.lock();
+		let io_queue_pair = io_queue_pairs
+			.get_mut(io_queue_pair_id)
+			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
+		io_queue_pair
+			.deallocate_buffer(buffer)
+			.map_err(|_error| SysNvmeError::Other)
+	}
+
+	/// Reads from the IO queue pair with ID `io_queue_pair_id`
+	/// into the `buffer` starting from the `logical_block_address`.
+	pub(crate) fn read_from_io_queue_pair<T>(
 		&mut self,
 		io_queue_pair_id: usize,
 		buffer: &mut [u8],
@@ -340,31 +365,15 @@ impl NvmeDriver {
 		let io_queue_pair = io_queue_pairs
 			.get_mut(&io_queue_pair_id)
 			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
-		if buffer.len() > self.controller.controller_data().max_transfer_size {
-			return Err(SysNvmeError::BufferTooBig);
-		}
-
-		let layout = Layout::from_size_align(buffer.len(), BasePageSize::SIZE as usize)
-			.map_err(|_| SysNvmeError::BufferTooBig)?;
-		let mut pointer = DeviceAlloc {}
-			.allocate(layout)
-			.map_err(|_| SysNvmeError::CouldNotAllocateMemory)?;
-		let kernel_buffer: &mut [u8] = unsafe { pointer.as_mut() };
-
 		io_queue_pair
-			.read(
-				kernel_buffer.as_mut_ptr(),
-				kernel_buffer.len(),
-				logical_block_address,
-			)
-			.map_err(|_| SysNvmeError::CouldNotReadFromIoQueuePair)?;
-
-		buffer.copy_from_slice(&kernel_buffer[0..buffer.len()]);
+			.read(buffer, logical_block_address)
+			.map_err(|_error| SysNvmeError::CouldNotReadFromIoQueuePair)?;
 		Ok(())
 	}
 
-	/// Writes a buffer to an IO queue pair starting from a Logical Block Address.
-	pub(crate) fn write_to_io_queue_pair(
+	/// Writes the `buffer` to the IO queue pair with ID `io_queue_pair_id`
+	/// starting from the `logical_block_address`.
+	pub(crate) fn write_to_io_queue_pair<T>(
 		&mut self,
 		io_queue_pair_id: usize,
 		buffer: &[u8],
@@ -374,28 +383,11 @@ impl NvmeDriver {
 		let io_queue_pair = io_queue_pairs
 			.get_mut(&io_queue_pair_id)
 			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
-		if buffer.len() > self.controller.controller_data().max_transfer_size {
-			return Err(SysNvmeError::BufferTooBig);
-		}
-
-		let layout = Layout::from_size_align(buffer.len(), BasePageSize::SIZE as usize)
-			.map_err(|_| SysNvmeError::BufferTooBig)?;
-		let mut pointer = DeviceAlloc {}
-			.allocate(layout)
-			.map_err(|_| SysNvmeError::CouldNotAllocateMemory)?;
-		let kernel_buffer: &mut [u8] = unsafe { pointer.as_mut() };
-		kernel_buffer[0..buffer.len()].copy_from_slice(buffer);
-
 		io_queue_pair
-			.write(
-				kernel_buffer.as_ptr(),
-				kernel_buffer.len(),
-				logical_block_address,
-			)
-			.map_err(|_| SysNvmeError::CouldNotWriteToIoQueuePair)?;
+			.write(buffer, logical_block_address)
+			.map_err(|_error| SysNvmeError::CouldNotWriteToIoQueuePair)?;
 		Ok(())
 	}
-}
 
 pub(crate) struct NvmeAllocator {
 	pub(crate) device_allocator: DeviceAlloc,
