@@ -93,6 +93,22 @@ pub unsafe extern "C" fn sys_nvme_namespace(
 
 #[hermit_macro::system]
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn sys_nvme_clear_namespace(
+	namespace_id: &NamespaceId,
+) -> usize {
+	fn inner(namespace_id: &NamespaceId) -> Result<(), SysNvmeError> {
+		let driver = get_nvme_driver().ok_or(SysNvmeError::DeviceDoesNotExist)?;
+		let lock = driver.lock();
+        lock.clear_namespace(namespace_id)
+	}
+	match inner(namespace_id) {
+		Ok(()) => 0,
+		Err(error) => error as usize,
+	}
+}
+
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sys_nvme_maximum_transfer_size(result: *mut usize) -> usize {
 	fn inner(result: *mut usize) -> Result<(), SysNvmeError> {
 		if result.is_null() {

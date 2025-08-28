@@ -65,6 +65,13 @@ impl NvmeDriver {
 			.copied()
 	}
 
+	pub(crate) fn clear_namespace(&self, namespace_id: &NamespaceId) -> Result<(), SysNvmeError> {
+		self.device
+			.lock()
+			.clear_namespace(namespace_id)
+			.map_err(|_| SysNvmeError::Other)
+	}
+
 	pub(crate) fn maximum_transfer_size(&self) -> usize {
 		self.device
 			.lock()
