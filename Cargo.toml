@@ -58,6 +58,7 @@ idle-poll = []
 mmap = []
 newlib = []
 nostd = []
+# nvme = ["pci", "vroom"]
 pci = ["virtio/pci"]
 rtl8139 = ["tcp", "pci"]
 semihosting = ["dep:semihosting"]
@@ -122,7 +123,6 @@ log = { version = "0.4", default-features = false }
 num = { version = "0.4", default-features = false }
 num-derive = "0.4"
 num-traits = { version = "0.2", default-features = false }
-nvme = "0.2.2"
 pci-ids = { version = "0.2", optional = true }
 pci_types = { version = "0.10" }
 rand_chacha = { version = "0.9", default-features = false }
@@ -133,6 +133,7 @@ take-static = "0.1"
 talc = { version = "4" }
 time = { version = "0.3", default-features = false }
 volatile = "0.6"
+vroom = { git = "https://github.com/valopok/vroom", branch = "hermit", default-features = false }
 zerocopy = { version = "0.8", default-features = false }
 uhyve-interface = "0.1.3"
 
