@@ -17,7 +17,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint};
 
 use crate::errno::Errno;
-#[cfg(any(feature = "tcp", feature = "udp"))]
+#[cfg(feature = "net")]
 use crate::executor::network::{NIC, NetworkState};
 #[cfg(feature = "tcp")]
 use crate::fd::socket::tcp;
