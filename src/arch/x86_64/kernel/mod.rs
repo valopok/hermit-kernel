@@ -20,7 +20,7 @@ pub mod interrupts;
 	not(feature = "pci"),
 	any(
 		feature = "console",
-		all(feature = "virtio-net", any(feature = "tcp", feature = "udp"))
+		all(feature = "virtio-net", any(feature = "tcp", feature = "udp")),
 	),
 ))]
 pub mod mmio;
