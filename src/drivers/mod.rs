@@ -21,7 +21,7 @@ pub mod nvme;
 	),
 	feature = "fuse",
 	feature = "vsock",
-	feature = "console"
+	feature = "console",
 ))]
 pub mod virtio;
 #[cfg(feature = "vsock")]
@@ -53,7 +53,7 @@ pub mod error {
 		),
 		feature = "fuse",
 		feature = "vsock",
-		feature = "console"
+		feature = "console",
 	))]
 	use crate::drivers::virtio::error::VirtioError;
 
@@ -68,7 +68,7 @@ pub mod error {
 		),
 		feature = "fuse",
 		feature = "vsock",
-		feature = "console"
+		feature = "console",
 	))]
 	#[derive(Debug)]
 	pub enum DriverError {
@@ -81,7 +81,7 @@ pub mod error {
 			),
 			feature = "fuse",
 			feature = "vsock",
-			feature = "console"
+			feature = "console",
 		))]
 		InitVirtioDevFail(VirtioError),
 		#[cfg(all(target_arch = "x86_64", feature = "rtl8139"))]
@@ -99,7 +99,7 @@ pub mod error {
 		),
 		feature = "fuse",
 		feature = "vsock",
-		feature = "console"
+		feature = "console",
 	))]
 	impl From<VirtioError> for DriverError {
 		fn from(err: VirtioError) -> Self {
@@ -132,7 +132,7 @@ pub mod error {
 		),
 		feature = "fuse",
 		feature = "vsock",
-		feature = "console"
+		feature = "console",
 	))]
 	impl core::fmt::Display for DriverError {
 		#[allow(unused_variables)]
@@ -143,7 +143,7 @@ pub mod error {
 						not(all(
 							target_arch = "riscv64",
 							feature = "gem-net",
-							not(feature = "pci")
+							not(feature = "pci"),
 						)),
 						not(all(target_arch = "x86_64", feature = "rtl8139")),
 						feature = "virtio-net",
@@ -151,7 +151,7 @@ pub mod error {
 					),
 					feature = "fuse",
 					feature = "vsock",
-					feature = "console"
+					feature = "console",
 				))]
 				DriverError::InitVirtioDevFail(ref err) => {
 					write!(f, "Virtio driver failed: {err:?}")
@@ -187,7 +187,7 @@ pub(crate) fn init() {
 		not(feature = "pci"),
 		target_arch = "x86_64",
 		feature = "virtio-net",
-		any(feature = "tcp", feature = "udp")
+		any(feature = "tcp", feature = "udp"),
 	))]
 	crate::arch::x86_64::kernel::mmio::init_drivers();
 	#[cfg(all(
@@ -195,8 +195,8 @@ pub(crate) fn init() {
 		target_arch = "aarch64",
 		any(
 			feature = "console",
-			all(feature = "virtio-net", any(feature = "tcp", feature = "udp"))
-		)
+			all(feature = "virtio-net", any(feature = "tcp", feature = "udp")),
+		),
 	))]
 	crate::arch::aarch64::kernel::mmio::init_drivers();
 
