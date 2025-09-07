@@ -7,7 +7,7 @@ use core::fmt;
 use ahash::RandomState;
 use hashbrown::HashMap;
 use hermit_sync::without_interrupts;
-#[cfg(any(feature = "fuse", feature = "vsock", feature = "console"))]
+#[cfg(any(feature = "fuse", feature = "vsock", feature = "console", feature = "nvme"))]
 use hermit_sync::InterruptTicketMutex;
 use memory_addresses::{PhysAddr, VirtAddr};
 use pci_types::capability::CapabilityIterator;
@@ -359,7 +359,7 @@ impl PciDriver {
 		}
 	}
 
-    #[cfg(feature = "nvme")]
+	#[cfg(feature = "nvme")]
 	fn get_nvme_driver(&self) -> Option<&InterruptTicketMutex<NvmeDriver>> {
 		#[allow(unreachable_patterns)]
 		match self {
@@ -569,7 +569,7 @@ pub(crate) fn init() {
 			}
 		}
 
-        #[cfg(feature = "nvme")]
+		#[cfg(feature = "nvme")]
 		for adapter in PCI_DEVICES.finalize().iter().filter(|adapter| {
 			let (_, class_id, subclass_id, _) =
 				adapter.header().revision_and_class(adapter.access());
