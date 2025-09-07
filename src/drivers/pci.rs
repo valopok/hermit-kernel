@@ -7,7 +7,13 @@ use core::fmt;
 use ahash::RandomState;
 use hashbrown::HashMap;
 use hermit_sync::without_interrupts;
-#[cfg(any(feature = "tcp", feature = "udp", feature = "fuse", feature = "vsock"))]
+#[cfg(any(
+	feature = "tcp",
+	feature = "udp",
+	feature = "fuse",
+	feature = "vsock",
+	feature = "nvme"
+))]
 use hermit_sync::InterruptTicketMutex;
 use memory_addresses::{PhysAddr, VirtAddr};
 use pci_types::capability::CapabilityIterator;
@@ -340,7 +346,7 @@ pub(crate) enum PciDriver {
 		any(feature = "tcp", feature = "udp")
 	))]
 	VirtioNet(InterruptTicketMutex<VirtioNetDriver>),
-    #[cfg(feature = "nvme")]
+	#[cfg(feature = "nvme")]
 	Nvme(InterruptTicketMutex<NvmeDriver>),
 	#[cfg(all(
 		target_arch = "x86_64",
@@ -376,7 +382,7 @@ impl PciDriver {
 		}
 	}
 
-    #[cfg(feature = "nvme")]
+	#[cfg(feature = "nvme")]
 	fn get_nvme_driver(&self) -> Option<&InterruptTicketMutex<NvmeDriver>> {
 		#[allow(unreachable_patterns)]
 		match self {
@@ -456,7 +462,7 @@ impl PciDriver {
 
 				(irq_number, fuse_handler)
 			}
-            #[cfg(feature = "nvme")]
+			#[cfg(feature = "nvme")]
 			Self::Nvme(drv) => {
 				let irq_number = drv.lock().get_interrupt_number();
 				fn nvme_handler() {}
@@ -577,7 +583,7 @@ pub(crate) fn init() {
 			}
 		}
 
-        #[cfg(feature = "nvme")]
+		#[cfg(feature = "nvme")]
 		for adapter in PCI_DEVICES.finalize().iter().filter(|adapter| {
 			let (_, class_id, subclass_id, _) =
 				adapter.header().revision_and_class(adapter.access());
