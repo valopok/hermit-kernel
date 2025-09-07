@@ -58,6 +58,7 @@ idle-poll = []
 mmap = []
 newlib = []
 nostd = []
+nvme = ["pci", "vroom"]
 pci = ["virtio/pci"]
 rtl8139 = ["tcp", "pci"]
 semihosting = ["dep:semihosting"]
@@ -132,6 +133,7 @@ take-static = "0.1"
 talc = { version = "4" }
 time = { version = "0.3", default-features = false }
 volatile = "0.6"
+vroom = { git = "https://github.com/valopok/vroom", branch = "thesis", default-features = false, optional = true }
 zerocopy = { version = "0.8", default-features = false }
 uhyve-interface = "0.1.3"
 
