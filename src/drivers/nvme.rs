@@ -65,6 +65,13 @@ impl NvmeDriver {
 			.copied()
 	}
 
+	pub(crate) fn clear_namespace(&self, namespace_id: &NamespaceId) -> Result<(), SysNvmeError> {
+		self.device
+			.lock()
+			.clear_namespace(namespace_id)
+			.map_err(|_| SysNvmeError::CouldNotClearNamespace)
+	}
+
 	pub(crate) fn maximum_transfer_size(&self) -> usize {
 		self.device
 			.lock()
@@ -140,7 +147,7 @@ impl NvmeDriver {
 			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
 		io_queue_pair
 			.allocate_buffer(number_of_elements)
-			.map_err(|_error| SysNvmeError::Other)
+			.map_err(|_error| SysNvmeError::CouldNotAllocateBuffer)
 	}
 
 	pub(crate) fn deallocate_buffer<T>(
@@ -154,7 +161,7 @@ impl NvmeDriver {
 			.ok_or(SysNvmeError::CouldNotFindIoQueuePair)?;
 		io_queue_pair
 			.deallocate_buffer(buffer)
-			.map_err(|_error| SysNvmeError::Other)
+			.map_err(|_error| SysNvmeError::CouldNotDeallocateBuffer)
 	}
 
 	/// Reads from the IO queue pair with ID `io_queue_pair_id`

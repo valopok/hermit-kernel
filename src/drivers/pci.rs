@@ -33,6 +33,7 @@ use crate::drivers::net::rtl8139::{self, RTL8139Driver};
 use crate::drivers::net::virtio::VirtioNetDriver;
 #[cfg(any(feature = "tcp", feature = "udp"))]
 use crate::drivers::net::NetworkDriver;
+#[cfg(feature = "nvme")]
 use crate::drivers::nvme::NvmeDriver;
 #[cfg(any(
 	all(
@@ -358,6 +359,7 @@ impl PciDriver {
 		}
 	}
 
+    #[cfg(feature = "nvme")]
 	fn get_nvme_driver(&self) -> Option<&InterruptTicketMutex<NvmeDriver>> {
 		#[allow(unreachable_patterns)]
 		match self {
@@ -494,6 +496,7 @@ pub(crate) fn get_console_driver() -> Option<&'static InterruptTicketMutex<Virti
 		.find_map(|drv| drv.get_console_driver())
 }
 
+#[cfg(feature = "nvme")]
 pub(crate) fn get_nvme_driver() -> Option<&'static InterruptTicketMutex<NvmeDriver>> {
 	PCI_DRIVERS
 		.get()?
@@ -566,6 +569,7 @@ pub(crate) fn init() {
 			}
 		}
 
+        #[cfg(feature = "nvme")]
 		for adapter in PCI_DEVICES.finalize().iter().filter(|adapter| {
 			let (_, class_id, subclass_id, _) =
 				adapter.header().revision_and_class(adapter.access());

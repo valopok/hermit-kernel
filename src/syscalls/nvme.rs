@@ -17,9 +17,11 @@ pub(crate) enum SysNvmeError {
 	BufferTooBig = 10,
 	BufferIncorrectlySized = 11,
 	CouldNotAllocateMemory = 12,
-	CouldNotReadFromIoQueuePair = 13,
-	CouldNotWriteToIoQueuePair = 14,
-	Other = 15,
+    CouldNotAllocateBuffer = 13,
+    CouldNotDeallocateBuffer = 14,
+	CouldNotReadFromIoQueuePair = 15,
+	CouldNotWriteToIoQueuePair = 16,
+    CouldNotClearNamespace = 17,
 }
 
 #[hermit_macro::system]
