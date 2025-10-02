@@ -258,7 +258,7 @@ impl<T: ConfigRegionAccess> fmt::Display for PciDevice<T> {
 
 			#[cfg(not(feature = "pci-ids"))]
 			let (class_name, vendor_name, device_name) =
-                ("Unknown Class", "Unknown Vendor", "Unknown Device");
+				("Unknown Class", "Unknown Vendor", "Unknown Device");
 
 			// Output detailed readable information about this device.
 			write!(
@@ -430,6 +430,7 @@ impl PciDriver {
 				fn nvme_handler() {}
 				(irq_number, nvme_handler)
 			}
+            _ => todo!(),
 		}
 	}
 }
